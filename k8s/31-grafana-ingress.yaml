@@ -1,0 +1,26 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana
+  namespace: sense-viz
+  annotations:
+    haproxy-ingress.github.io/ssl-redirect: "true"
+    # Long-range queries against Tempo and Mimir outlive the default.
+    haproxy-ingress.github.io/timeout-server: 300s
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: sense-viz.nrp-nautilus.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 3000
+  tls:
+    - hosts:
+        - sense-viz.nrp-nautilus.io

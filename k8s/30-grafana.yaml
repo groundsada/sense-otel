@@ -1,11 +1,7 @@
 ---
-# Grafana for the sense-viz stack.
-#
-# This does NOT replace autogole-grafana. That stack stays primary: it holds 60+
-# dashboards, 11 datasources including ESnet Stardust, and sense-rtmon writes
-# generated per-flow dashboards into it on a schedule. This one exists to build
-# and validate the push path alongside it. Replacement is a later, separate
-# decision.
+# Does NOT replace autogole-grafana, which stays primary (60+ dashboards, 11
+# datasources, sense-rtmon writes into it). This one validates the push path
+# alongside it.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,15 +11,9 @@ data:
   datasources.yaml: |
     apiVersion: 1
     datasources:
-      # Single tenant for the whole fleet, with `sitename` as an attribute the
-      # gateway stamps from each site's verified credential.
-      #
-      # Per-site tenants were the alternative. They were not chosen because the
-      # thing that actually needs to be unforgeable is site attribution, and
-      # stamping it at the gateway achieves that without 29 tenants to
-      # provision, 29 datasources to keep in step, and Loki's refusal to merge
-      # tenants in one query. It also matches the model already in production:
-      # one Prometheus, `sitename` as a label applied centrally.
+      # One tenant for the fleet; `sitename` carries attribution. Per-site
+      # tenants would mean 29 datasources and Loki cannot merge tenants in a
+      # single query.
       - name: Tempo
         type: tempo
         uid: tempo-sense
@@ -51,10 +41,8 @@ data:
         url: http://loki:3100
         jsonData:
           httpHeaderName1: X-Scope-OrgID
-          # The other half of the pivot: a log line carrying a trace id becomes
-          # a link into Tempo. This is the entire point of instrumenting logging
-          # in SiteRM, and it is worthless until trace ids are real rather than
-          # the trace_id=0 that an inactive span produces.
+          # Log line -> Tempo. Worthless until trace ids are real rather than
+          # the trace_id=0 an inactive span produces.
           derivedFields:
             - name: TraceID
               matcherRegex: 'trace_id=(\w+)'
@@ -75,15 +63,9 @@ data:
         secureJsonData:
           httpHeaderValue1: "sense"
 
-      # The existing production Prometheus, read-only, alongside Mimir.
-      #
-      # Not decoration: during the dual-path period the same series arrives both
-      # ways, and the only way to prove the forced-parity requirement holds is
-      # to graph both in one panel and see them coincide. Without this the
-      # cutover is a leap of faith.
-      #
-      # Requires credentials -- fill in via the grafana-autogole secret rather
-      # than here.
+      # Production Prometheus, read-only. Needed to prove forced parity: graph
+      # scraped and pushed series in one panel and see them coincide.
+      # Credentials come from the optional grafana-autogole secret.
       - name: Prometheus (autogole)
         type: prometheus
         uid: prom-autogole
@@ -137,6 +119,14 @@ spec:
             - containerPort: 3000
               name: http
           env:
+            - name: GF_SERVER_ROOT_URL
+              value: https://sense-viz.nrp-nautilus.io
+            # Publicly reachable via ingress, so no anonymous access and no
+            # self-signup.
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
             - name: GF_SECURITY_ADMIN_USER
               valueFrom:
                 secretKeyRef:
@@ -147,8 +137,6 @@ spec:
                 secretKeyRef:
                   name: grafana-admin
                   key: admin-password
-            # Datasource provisioning expands these, which keeps the autogole
-            # credentials out of the ConfigMap and out of git.
             - name: AUTOGOLE_PROM_USER
               valueFrom:
                 secretKeyRef:

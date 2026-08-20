@@ -1,14 +1,5 @@
 ---
-# The OTLP gateway itself. Its pipeline is collector/config.yaml, turned into a
-# ConfigMap by the configMapGenerator in kustomization.yaml -- so the two cannot
-# drift, and editing the pipeline rolls this Deployment.
-#
-# A Deployment rather than a StatefulSet: the gateway holds no durable state.
-# The one caveat is tail sampling, which buffers a trace's spans in memory until
-# it decides. With more than one replica, spans of the same trace can land on
-# different replicas and each sees only part of the trace. Scaling past one
-# replica therefore needs a loadbalancing exporter in front, routing by trace
-# id. One replica is correct until throughput demands otherwise.
+# Pipeline lives in collector/config.yaml, mounted via the configMapGenerator.
 apiVersion: v1
 kind: Service
 metadata:
@@ -35,6 +26,8 @@ metadata:
   name: otlp-gateway
   namespace: sense-viz
 spec:
+  # Tail sampling buffers a trace's spans in memory, so two replicas each see
+  # only part of a trace. Scaling out needs a loadbalancing exporter in front.
   replicas: 1
   selector:
     matchLabels:
@@ -69,18 +62,16 @@ spec:
             - containerPort: 13133
               name: health
           env:
-            # Backends are addressed by service name inside this namespace, so
-            # they are not configurable here on purpose -- a site never learns
-            # them and never needs to.
             - name: TENANT
               value: sense
-            # Baseline rate for traces that are neither errors nor slow. Errors
-            # and slow traces are kept unconditionally by the tail sampling
-            # policies, so this is the rate for the uninteresting majority.
+            # Rate for traces that are neither errors nor slow; those are kept
+            # unconditionally by the tail_sampling policies.
             - name: SAMPLE_PERCENT
               value: "10"
+            # Not `sub` -- that is the service account UUID. Keycloak sets this
+            # claim from a hardcoded per-client mapper.
             - name: OIDC_USERNAME_CLAIM
-              value: sub
+              value: sitename
           envFrom:
             - secretRef:
                 name: gateway-oidc
@@ -102,12 +93,11 @@ spec:
           resources:
             requests:
               cpu: "500m"
-              # memory_limiter in the config works off a percentage of this
-              # limit, so the two are coupled: changing the limit changes when
-              # the collector starts refusing data.
               memory: 1Gi
             limits:
               cpu: "2"
+              # memory_limiter works off a percentage of this, so the two move
+              # together.
               memory: 4Gi
       volumes:
         - name: conf

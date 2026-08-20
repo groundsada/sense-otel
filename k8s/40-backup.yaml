@@ -1,28 +1,11 @@
 ---
-# Nightly mirror of the primary buckets to the central RGW.
+# Nightly mirror of the primary buckets to the central RGW. Mimir, Tempo and
+# Loki each take exactly ONE backend, so there is no dual-write and failover is
+# manual -- see the runbook in README.md.
 #
-# This is the fallback story, and it is worth being precise about what it does
-# and does not give you, because Mimir, Tempo and Loki each take exactly ONE
-# object-storage backend. There is no dual-write, and no automatic failover.
-#
-# What this provides: if nautiluss3 is lost, the data up to the last successful
-# run exists in the central buckets, and the stack can be pointed at them by
-# patching the obs-s3 secret and restarting. See the runbook in README.md.
-#
-# What it does NOT provide:
-#   - Zero data loss. The window is up to 24h -- whatever was written since the
-#     last run is only in the primary.
-#   - A backup with history. `--remove` makes this a MIRROR: anything deleted at
-#     the source is deleted at the destination on the next run. It protects
-#     against losing the RGW, not against something deleting the data.
-#   - Continuity during a short outage. That is already handled better by the
-#     local volumes -- Mimir's TSDB, Tempo's WAL and Loki's ingester all hold
-#     recent data and retry. Failing over during a brief blip would be actively
-#     worse, since it splits the data across two buckets that nothing can read
-#     together.
-#
-# Same shape as the sense-dev obs-backup job, deliberately, so there is one
-# pattern to understand rather than two.
+# `--remove` makes this a mirror, not a backup with history: it protects against
+# losing the RGW, not against something deleting the data. Window is up to 24h.
+# Same shape as the sense-dev obs-backup job.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -46,9 +29,7 @@ spec:
               args:
                 - |
                   set -e
-                  # obs-s3's endpoint is a bare hostname, matching what the
-                  # Tempo/Mimir/Loki configs expect. mc needs a scheme, so add
-                  # one when it is absent.
+                  # Endpoints are bare hostnames; mc needs a scheme.
                   [ "${PRIMARY_ENDPOINT#http}" = "$PRIMARY_ENDPOINT" ] && PRIMARY_ENDPOINT="http://$PRIMARY_ENDPOINT"
                   [ "${FALLBACK_ENDPOINT#http}" = "$FALLBACK_ENDPOINT" ] && FALLBACK_ENDPOINT="http://$FALLBACK_ENDPOINT"
                   mc alias set primary  "$PRIMARY_ENDPOINT"  "$PRIMARY_AK"  "$PRIMARY_SK"
@@ -58,8 +39,7 @@ spec:
                     src="primary/mfsada-sense-viz-${sig}"
                     dst="fallback/mfsada-sense-viz-${sig}"
                     echo "== syncing ${src} -> ${dst}"
-                    # One signal failing must not stop the others: a Loki
-                    # problem should not also cost you the trace backup.
+                    # One signal failing must not stop the others.
                     if mc mirror --overwrite --remove "${src}" "${dst}"; then
                       echo "  ok: ${sig}"
                     else
@@ -67,9 +47,7 @@ spec:
                       rc=1
                     fi
                   done
-                  # Exit non-zero if any signal failed, so the Job is marked
-                  # failed and shows up as such rather than reporting success
-                  # while silently having copied nothing.
+                  # Non-zero so a partial failure is not reported as success.
                   echo "backup complete (rc=${rc})"
                   exit $rc
               env:

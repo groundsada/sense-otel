@@ -1,7 +1,7 @@
 # sense-otel
 
-OTLP gateway and LGTM backends for SENSE fleet telemetry, deployed in the
-`sense-viz` namespace.
+OTLP gateway and LGTM backends for SENSE fleet telemetry, in the `sense-viz`
+namespace.
 
 One endpoint that every SiteRM frontend pushes traces, logs and metrics to.
 Sites never address Tempo, Loki or Mimir directly, so backends can be moved or
@@ -20,18 +20,29 @@ replaced without reconfiguring 29 sites.
              (PULL, 29 jobs, unchanged, still primary)
 ```
 
+| | |
+|---|---|
+| OTLP ingest | `https://sense-otlp.nrp-nautilus.io/v1/{traces,metrics,logs}` |
+| in-cluster gRPC | `otlp-gateway.sense-viz.svc:4317` |
+| Grafana | `https://sense-viz.nrp-nautilus.io` |
+| issuer | `https://sd-keycloak-sense-dev.nrp-nautilus.io/realms/sense-telemetry` |
+| audience | `sense-otlp` |
+
 ## The one property that matters
 
 **Site identity comes from the credential, never from the payload.**
 
-A site authenticates as itself; the gateway stamps `sitename` from the verified
-token subject and overwrites anything the site put there. A misconfigured or
-hostile site cannot write into another site's data.
+Each site holds a keycloak client whose token carries a `sitename` claim fixed
+by a hardcoded mapper at issue time. The gateway uses that claim as the token
+subject and stamps it over whatever `sitename` the payload contained. A
+misconfigured or hostile site cannot write into another site's data.
 
-This is not a new idea here — it is what the autogole Prometheus already does,
-applying `sitename`, `latitude` and `longitude` centrally with
-`relabel_configs` at scrape time. Push has no relabeller, so the gateway has to
-be the thing that does it.
+Verified, not assumed — a span sent with `sitename=EVIL_SPOOFED_SITE` under the
+`T2_US_SDSC` credential lands in Tempo as `sitename=T2_US_SDSC`.
+
+This is the same guarantee the autogole Prometheus gets by applying `sitename`
+centrally in `relabel_configs` at scrape time. Push has no relabeller, so the
+gateway has to be the thing that does it.
 
 ## Layout
 
@@ -42,11 +53,12 @@ be the thing that does it.
 | `k8s/10-mimir.yaml` | metrics |
 | `k8s/11-tempo.yaml` | traces |
 | `k8s/12-loki.yaml` | logs |
-| `k8s/20-gateway.yaml` | the gateway Deployment and Service |
-| `k8s/21-gateway-ingress.yaml` | public HTTPS. Apply **last**, only after auth works |
-| `k8s/30-grafana.yaml` | Grafana with datasources wired for the trace↔log pivot |
+| `k8s/20-gateway.yaml` | gateway Deployment and Service |
+| `k8s/21-gateway-ingress.yaml` | public HTTPS ingest |
+| `k8s/30-grafana.yaml` | Grafana, datasources wired for the trace↔log pivot |
+| `k8s/31-grafana-ingress.yaml` | public HTTPS UI |
 | `k8s/40-backup.yaml` | nightly mirror of the primary buckets to the fallback RGW |
-| `kustomization.yaml` | the base — everything except the public ingress |
+| `scripts/site-credential.sh` | print one site's OTLP config block |
 
 ## Deploying
 
@@ -60,48 +72,42 @@ kubectl create secret generic obs-s3 -n sense-viz \
   --from-literal=S3_ENDPOINT=rook-ceph-rgw-nautiluss3.rook
 
 kubectl create secret generic gateway-oidc -n sense-viz \
-  --from-literal=OIDC_ISSUER_URL=https://<issuer>/realms/<realm> \
-  --from-literal=OIDC_AUDIENCE=<client-id>
+  --from-literal=OIDC_ISSUER_URL=https://<issuer>/realms/sense-telemetry \
+  --from-literal=OIDC_AUDIENCE=sense-otlp
 
 kubectl create secret generic grafana-admin -n sense-viz \
   --from-literal=admin-user=... --from-literal=admin-password=...
 ```
 
-Then:
+Then `kubectl apply -k .`
 
-```sh
-kubectl apply -k .                            # everything except the ingress
-kubectl apply -f k8s/21-gateway-ingress.yaml  # public HTTPS, once auth is verified
-```
-
-The ingress is out of `kustomization.yaml` on purpose. Until OIDC is confirmed
-working, applying it would publish an unauthenticated OTLP endpoint to the
-internet. Everything else is cluster-internal, so the stack is safe to stand up
-first.
-
-`collector/config.yaml` is turned into the gateway ConfigMap by a
+`collector/config.yaml` becomes the gateway ConfigMap via a
 `configMapGenerator`, which appends a content hash to the name and rewrites the
 Deployment's reference — so editing the pipeline rolls the gateway on the next
-apply, rather than waiting for an unrelated restart to pick it up.
+apply rather than waiting for an unrelated restart to pick it up.
 
-## Pointing a site at it
+## Onboarding a site
 
-Config is environment variables in the SiteRM frontend's `/etc/environment`
-(delivered by the `environment_file` block in the frontend helm chart):
-
-```sh
-OTEL_ENABLED=true
-OTLP_ENDPOINT=https://<gateway-host>/v1/traces
-```
-
-Frontends **inside the cluster** can use gRPC instead, which is more efficient:
+Sites are provisioned in the `sense-telemetry` realm as confidential clients
+named `siterm-<SITENAME>`, service accounts only, with two mappers: a hardcoded
+`sitename` claim and an audience of `sense-otlp`. All 29 SiteRM frontends
+already exist.
 
 ```sh
-OTLP_ENDPOINT=otlp-gateway.sense-viz.svc:4317
+./scripts/site-credential.sh T2_US_SDSC
 ```
 
-Both protocols are accepted. SiteRM selects the exporter from the endpoint
-scheme, so a site only ever pastes a URL.
+A site exchanges those for a token by client credentials grant:
+
+```sh
+curl -s -X POST "$ISSUER/protocol/openid-connect/token" \
+  -d grant_type=client_credentials \
+  -d client_id=siterm-T2_US_SDSC \
+  --data-urlencode "client_secret=$SECRET" | jq -r .access_token
+```
+
+Adding a site later means one client with the same two mappers, and nothing on
+the gateway changes.
 
 ### Why two protocols
 
@@ -114,7 +120,8 @@ only through the public HTTPS ingress.
 HAProxy can carry gRPC with a backend-protocol annotation, but gRPC needs HTTP/2
 negotiated end to end, and an institutional egress proxy that terminates and
 re-originates TLS breaks it — surfacing as an opaque connection error. OTLP/HTTP
-is an ordinary POST and survives anything that passes normal HTTPS.
+is an ordinary POST and survives anything that passes normal HTTPS. Frontends
+inside the cluster should still use gRPC on 4317.
 
 ## Storage and failover
 
@@ -158,12 +165,20 @@ something deleting the data.
 
 ## Decisions worth knowing before changing anything
 
-**Metrics keep their existing names.** The `prometheusremotewrite` exporter sets
-`add_metric_suffixes: false`. The OTel-to-Prometheus translation would otherwise
-append unit and `_total` suffixes, and 67 existing alert rules plus every
-existing dashboard panel match on the current names. During the dual-path period
-the same series must be byte-identical whether it arrived by scrape or by push,
-or the two cannot be compared and the cutover cannot be verified.
+**Metrics keep their existing names.** The remote-write exporter sets
+`translation_strategy: UnderscoreEscapingWithoutSuffixes`. The default
+translation appends unit and `_total` suffixes, and 67 existing alert rules plus
+every existing dashboard panel match on the current names. During the dual-path
+period the same series must be identical whether it arrived by scrape or by
+push, or the two cannot be compared and the cutover cannot be verified. A
+monotonic sum named `siterm_verify_counter` was confirmed to land in Mimir under
+exactly that name.
+
+**Identity comes from `auth.subject` only.** The oidc extension exposes exactly
+two context attributes, `subject` and `membership`. `auth.claims.<name>` is not
+reachable and resolves silently to nothing, so it looks like a working fallback
+and is not. `OIDC_USERNAME_CLAIM=sitename` is what makes the subject the site
+name instead of the service account's UUID.
 
 **Sampling is tail, not head.** With no instrumented orchestrator above SiteRM,
 every trace is its own root and each site samples independently, so a 10% head
@@ -187,3 +202,9 @@ exporter in front, routing by trace id.
 Metrics still reach Grafana by the existing pull path; Mimir receives a second
 copy by push so parity can be proven before anything is switched. Traces and
 logs are pure addition — there is nothing to migrate, which is why they go first.
+
+**The issuer is a dev keycloak.** `sd-keycloak` lives in the `sense-dev`
+namespace. The realm and clients are isolated from `master` and `StackV`, but
+this is not production-grade IdP hosting. The `providers:` block in the collector
+config is a list precisely so a second issuer (CILogon) can be accepted
+alongside it during a migration, with no flag day for sites.
