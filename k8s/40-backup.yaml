@@ -1,0 +1,112 @@
+---
+# Nightly mirror of the primary buckets to the central RGW.
+#
+# This is the fallback story, and it is worth being precise about what it does
+# and does not give you, because Mimir, Tempo and Loki each take exactly ONE
+# object-storage backend. There is no dual-write, and no automatic failover.
+#
+# What this provides: if nautiluss3 is lost, the data up to the last successful
+# run exists in the central buckets, and the stack can be pointed at them by
+# patching the obs-s3 secret and restarting. See the runbook in README.md.
+#
+# What it does NOT provide:
+#   - Zero data loss. The window is up to 24h -- whatever was written since the
+#     last run is only in the primary.
+#   - A backup with history. `--remove` makes this a MIRROR: anything deleted at
+#     the source is deleted at the destination on the next run. It protects
+#     against losing the RGW, not against something deleting the data.
+#   - Continuity during a short outage. That is already handled better by the
+#     local volumes -- Mimir's TSDB, Tempo's WAL and Loki's ingester all hold
+#     recent data and retry. Failing over during a brief blip would be actively
+#     worse, since it splits the data across two buckets that nothing can read
+#     together.
+#
+# Same shape as the sense-dev obs-backup job, deliberately, so there is one
+# pattern to understand rather than two.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: obs-backup
+  namespace: sense-viz
+spec:
+  schedule: "42 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: mirror
+              image: minio/mc:latest
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  # obs-s3's endpoint is a bare hostname, matching what the
+                  # Tempo/Mimir/Loki configs expect. mc needs a scheme, so add
+                  # one when it is absent.
+                  [ "${PRIMARY_ENDPOINT#http}" = "$PRIMARY_ENDPOINT" ] && PRIMARY_ENDPOINT="http://$PRIMARY_ENDPOINT"
+                  [ "${FALLBACK_ENDPOINT#http}" = "$FALLBACK_ENDPOINT" ] && FALLBACK_ENDPOINT="http://$FALLBACK_ENDPOINT"
+                  mc alias set primary  "$PRIMARY_ENDPOINT"  "$PRIMARY_AK"  "$PRIMARY_SK"
+                  mc alias set fallback "$FALLBACK_ENDPOINT" "$FALLBACK_AK" "$FALLBACK_SK"
+                  rc=0
+                  for sig in tempo loki mimir; do
+                    src="primary/mfsada-sense-viz-${sig}"
+                    dst="fallback/mfsada-sense-viz-${sig}"
+                    echo "== syncing ${src} -> ${dst}"
+                    # One signal failing must not stop the others: a Loki
+                    # problem should not also cost you the trace backup.
+                    if mc mirror --overwrite --remove "${src}" "${dst}"; then
+                      echo "  ok: ${sig}"
+                    else
+                      echo "  FAIL (continuing): ${sig}"
+                      rc=1
+                    fi
+                  done
+                  # Exit non-zero if any signal failed, so the Job is marked
+                  # failed and shows up as such rather than reporting success
+                  # while silently having copied nothing.
+                  echo "backup complete (rc=${rc})"
+                  exit $rc
+              env:
+                - name: PRIMARY_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: obs-s3
+                      key: S3_ENDPOINT
+                - name: PRIMARY_AK
+                  valueFrom:
+                    secretKeyRef:
+                      name: obs-s3
+                      key: AWS_ACCESS_KEY_ID
+                - name: PRIMARY_SK
+                  valueFrom:
+                    secretKeyRef:
+                      name: obs-s3
+                      key: AWS_SECRET_ACCESS_KEY
+                - name: FALLBACK_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: obs-s3-central
+                      key: S3_ENDPOINT
+                - name: FALLBACK_AK
+                  valueFrom:
+                    secretKeyRef:
+                      name: obs-s3-central
+                      key: AWS_ACCESS_KEY_ID
+                - name: FALLBACK_SK
+                  valueFrom:
+                    secretKeyRef:
+                      name: obs-s3-central
+                      key: AWS_SECRET_ACCESS_KEY
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi

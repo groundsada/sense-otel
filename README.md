@@ -45,6 +45,7 @@ be the thing that does it.
 | `k8s/20-gateway.yaml` | the gateway Deployment and Service |
 | `k8s/21-gateway-ingress.yaml` | public HTTPS. Apply **last**, only after auth works |
 | `k8s/30-grafana.yaml` | Grafana with datasources wired for the trace↔log pivot |
+| `k8s/40-backup.yaml` | nightly mirror of the primary buckets to the fallback RGW |
 | `kustomization.yaml` | the base — everything except the public ingress |
 
 ## Deploying
@@ -114,6 +115,46 @@ HAProxy can carry gRPC with a backend-protocol annotation, but gRPC needs HTTP/2
 negotiated end to end, and an institutional egress proxy that terminates and
 re-originates TLS breaks it — surfacing as an opaque connection error. OTLP/HTTP
 is an ordinary POST and survives anything that passes normal HTTPS.
+
+## Storage and failover
+
+Primary is `obs-s3` — the in-cluster nautiluss3 RGW, the same one `sense-dev`
+uses. Buckets `mfsada-sense-viz-{mimir,tempo,loki}`. Fallback is `obs-s3-central`
+on the central RGW, holding same-named buckets, kept current by the nightly
+mirror in `k8s/40-backup.yaml`.
+
+**Failover is manual, and that is not a shortcut.** Mimir, Tempo and Loki each
+accept exactly one object-storage backend. None supports dual-write or automatic
+failover, so "primary with fallback" can only mean "one config, switchable."
+
+Do not fail over for a short outage. Mimir's local TSDB, Tempo's WAL and Loki's
+ingester all hold recent data and retry, so a blip is already survived — and
+switching buckets mid-outage splits the data across two stores that nothing can
+query together, turning a recoverable problem into a permanent one.
+
+For a real loss of the primary RGW:
+
+```sh
+# 1. repoint the storage secret at the fallback
+kubectl get secret obs-s3-central -n sense-viz -o json \
+  | jq '.metadata = {"name":"obs-s3","namespace":"sense-viz"}' \
+  | kubectl apply -f -
+
+# 2. restart the backends to pick it up
+kubectl rollout restart statefulset/mimir statefulset/tempo statefulset/loki -n sense-viz
+
+# 3. suspend the mirror, or it will replicate back over the fallback
+kubectl patch cronjob obs-backup -n sense-viz -p '{"spec":{"suspend":true}}'
+```
+
+Step 3 matters: the job mirrors primary→fallback with `--remove`. Leaving it
+running after a failover would mirror an empty or broken primary over the only
+good copy.
+
+Expect to lose up to 24 hours — whatever was written since the last successful
+mirror exists only on the primary. And `--remove` makes this a mirror rather
+than a backup with history: it protects against losing the RGW, not against
+something deleting the data.
 
 ## Decisions worth knowing before changing anything
 

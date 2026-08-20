@@ -10,6 +10,7 @@ resources:
   - k8s/12-loki.yaml
   - k8s/20-gateway.yaml
   - k8s/30-grafana.yaml
+  - k8s/40-backup.yaml
 
 # k8s/21-gateway-ingress.yaml is deliberately NOT here. Until OIDC auth is
 # verified, applying it publishes an unauthenticated OTLP endpoint to the

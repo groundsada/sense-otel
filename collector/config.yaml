@@ -119,7 +119,7 @@ processors:
     send_batch_max_size: 2048
 
 exporters:
-  otlp/tempo:
+  otlp_grpc/tempo:
     endpoint: tempo:4317
     tls:
       insecure: true
@@ -131,7 +131,7 @@ exporters:
     sending_queue:
       enabled: true
 
-  otlphttp/loki:
+  otlp_http/loki:
     endpoint: http://loki:3100/otlp
     headers:
       X-Scope-OrgID: ${env:TENANT}
@@ -142,24 +142,28 @@ exporters:
       enabled: true
 
   # Prometheus remote-write rather than Mimir's OTLP endpoint, for one reason:
-  # `add_metric_suffixes: false`.
+  # `translation_strategy: UnderscoreEscapingWithoutSuffixes`.
   #
   # The OTel-to-Prometheus translation normally appends unit and `_total`
   # suffixes, so `service_state` would arrive as something else and every one of
   # the 67 existing alert rules and every existing dashboard panel would miss
   # it. During the dual-path period the same series must be identical whether it
   # arrived by scrape or by push, or the two cannot be compared and the cutover
-  # cannot be verified. This flag is what makes the forced-parity decision
-  # actually hold.
+  # cannot be verified. This setting is what makes the forced-parity decision
+  # actually hold, so do not "simplify" it away.
+  #
+  # It replaces the older `add_metric_suffixes: false`, which is deprecated and
+  # scheduled for removal. NoTranslation would be stricter still but requires
+  # remote-write 2.0.
   #
   # resource_to_telemetry_conversion promotes resource attributes to labels,
   # which is how `sitename` above becomes the label the dashboards filter on --
   # the same label autogole Prometheus produces by relabelling.
-  prometheusremotewrite/mimir:
+  prometheus_remote_write/mimir:
     endpoint: http://mimir:8080/api/v1/push
     headers:
       X-Scope-OrgID: ${env:TENANT}
-    add_metric_suffixes: false
+    translation_strategy: UnderscoreEscapingWithoutSuffixes
     resource_to_telemetry_conversion:
       enabled: true
     retry_on_failure:
@@ -187,14 +191,14 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resource/identity, tail_sampling, batch]
-      exporters: [otlp/tempo]
+      exporters: [otlp_grpc/tempo]
 
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, resource/identity, batch]
-      exporters: [prometheusremotewrite/mimir]
+      exporters: [prometheus_remote_write/mimir]
 
     logs:
       receivers: [otlp]
       processors: [memory_limiter, resource/identity, batch]
-      exporters: [otlphttp/loki]
+      exporters: [otlp_http/loki]
