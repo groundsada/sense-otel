@@ -44,6 +44,29 @@ processors:
         from_context: auth.subject
         action: upsert
 
+  # Metrics only. `resource_to_telemetry_conversion` on the remote-write
+  # exporter is what turns `sitename` into a label, and it cannot be selective --
+  # it promotes every resource attribute, so the SDK's own five arrive as labels
+  # on all 1,870 dashboard references' worth of series. Dropping them here keeps
+  # the pushed series comparable with the scraped one and keeps the cardinality
+  # of a label set that is already wide.
+  #
+  # service.name and siterm.component are deliberately kept for traces and logs
+  # -- Loki indexes the latter -- which is why this is a separate processor
+  # rather than part of resource/identity.
+  resource/metrics:
+    attributes:
+      - key: telemetry.sdk.language
+        action: delete
+      - key: telemetry.sdk.name
+        action: delete
+      - key: telemetry.sdk.version
+        action: delete
+      - key: service.version
+        action: delete
+      - key: siterm.component
+        action: delete
+
   # Head sampling cannot work here: with no orchestrator above SiteRM every
   # trace is its own root and sites sample independently, so a 10% head rate
   # yields 10% of fragments that look like whole traces. Deciding after the
@@ -132,7 +155,7 @@ service:
 
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, resource/identity, transform/sitename, batch]
+      processors: [memory_limiter, resource/identity, transform/sitename, resource/metrics, batch]
       exporters: [prometheus_remote_write/mimir]
 
     logs:
