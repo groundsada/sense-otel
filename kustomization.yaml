@@ -1,0 +1,36 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sense-viz
+
+resources:
+  - k8s/10-mimir.yaml
+  - k8s/11-tempo.yaml
+  - k8s/12-loki.yaml
+  - k8s/20-gateway.yaml
+  - k8s/30-grafana.yaml
+
+# k8s/21-gateway-ingress.yaml is deliberately NOT here. Until OIDC auth is
+# verified, applying it publishes an unauthenticated OTLP endpoint to the
+# internet. Apply it on its own once auth works:
+#
+#   kubectl apply -f k8s/21-gateway-ingress.yaml
+
+# The gateway pipeline lives in collector/config.yaml rather than inline in a
+# manifest, so it can be linted and diffed as a real config file.
+#
+# configMapGenerator appends a content hash to the ConfigMap name and rewrites
+# the Deployment's reference to match, so editing the pipeline rolls the gateway
+# automatically. Without that, a ConfigMap edit is picked up only at the next
+# unrelated restart -- which is what makes "I changed the sampling policy and
+# nothing happened" a recurring puzzle.
+configMapGenerator:
+  - name: otlp-gateway
+    files:
+      - config.yaml=collector/config.yaml
+
+# Secrets are never generated from files in this repository. They are created
+# once by hand from k8s/01-secrets.example.yaml, so that applying this can never
+# be the thing that puts a credential into the cluster from a file somebody
+# might later commit.

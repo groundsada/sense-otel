@@ -1,0 +1,200 @@
+# OTLP gateway for the SENSE fleet.
+#
+# One endpoint that every SiteRM frontend pushes traces, logs and metrics to.
+# Sites never address Tempo, Loki or Mimir directly, so the backends can be
+# moved or replaced without reconfiguring 29 sites.
+#
+# The load-bearing property: SITE IDENTITY COMES FROM THE CREDENTIAL, NEVER FROM
+# THE PAYLOAD. A site authenticates as itself and the gateway stamps `sitename`
+# from the verified token subject. Anything the site put in that attribute is
+# overwritten. This mirrors what the autogole Prometheus already does with
+# relabel_configs `replacement:` on scrape, and it is why a misconfigured or
+# hostile site cannot write into another site's data.
+#
+# Config values that differ per environment come from the environment:
+#   OIDC_ISSUER_URL   token issuer (keycloak in dev, CILogon in production)
+#   OIDC_AUDIENCE     expected `aud` claim
+#   OIDC_USERNAME_CLAIM  claim to use as the subject; defaults to `sub`
+#   TENANT            X-Scope-OrgID for the backends
+#   SAMPLE_PERCENT    baseline tail-sampling rate
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  # Authentication. Providers are a list so dev (keycloak) and production
+  # (CILogon) can be accepted by the same gateway during migration -- the
+  # extension picks a provider by matching the token's `iss` claim.
+  oidc:
+    providers:
+      - issuer_url: ${env:OIDC_ISSUER_URL}
+        audience: ${env:OIDC_AUDIENCE}
+        username_claim: ${env:OIDC_USERNAME_CLAIM}
+
+receivers:
+  otlp:
+    protocols:
+      # In-cluster and NRP-hosted frontends. 14 of 29 frontends can reach this
+      # directly; gRPC is the more efficient path and they should use it.
+      grpc:
+        endpoint: 0.0.0.0:4317
+        auth:
+          authenticator: oidc
+
+      # Everything outside NRP. 15 of 29 frontends live on FABRIC or on site
+      # infrastructure (cmssense1.fnal.gov, red-sense-rm.unl.edu,
+      # sense.af.uchicago.edu, ...) and reach this through the HTTPS ingress on
+      # 443. OTLP/HTTP is an ordinary POST, so it survives institutional egress
+      # proxies that would break gRPC's end-to-end HTTP/2.
+      http:
+        endpoint: 0.0.0.0:4318
+        auth:
+          authenticator: oidc
+
+processors:
+  # First in every pipeline. Under memory pressure this pushes back on the
+  # receivers rather than letting the process be OOM-killed, which would drop
+  # everything already batched.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+
+  # Site identity, stamped from the verified credential.
+  #
+  # `resource` rather than `attributes` on purpose: a resource attribute applies
+  # uniformly to traces, metrics and logs, and is what each backend turns into
+  # its own notion of identity -- a searchable resource field in Tempo, a label
+  # in Mimir via resource_to_telemetry_conversion, an index label in Loki via
+  # its otlp_config.
+  #
+  # `upsert` rather than `insert`: if the site set `sitename` itself, it is
+  # replaced. That is the point.
+  #
+  # Two actions rather than one: the subject is the fallback, and an explicit
+  # `sitename` claim wins when the IdP issues one. from_context performs no
+  # action when the key is absent, so the second line is a no-op for tokens
+  # without that claim.
+  resource/identity:
+    attributes:
+      - key: sitename
+        from_context: auth.subject
+        action: upsert
+      - key: sitename
+        from_context: auth.claims.sitename
+        action: upsert
+
+  # Traces only.
+  #
+  # Head sampling cannot work correctly here: with no instrumented orchestrator
+  # above SiteRM, every trace is its own root and each site samples
+  # independently, so a 10% head rate yields 10% of *fragments* -- a sampled
+  # frontend span whose PolicyService span was dropped. That looks like a
+  # complete trace and is not.
+  #
+  # Deciding here, after the whole trace has arrived, keeps or drops it as a
+  # unit. Errors and slow traces are kept unconditionally because those are the
+  # ones anybody actually opens.
+  tail_sampling:
+    decision_wait: 30s
+    num_traces: 50000
+    expected_new_traces_per_sec: 100
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: slow
+        type: latency
+        latency:
+          threshold_ms: 5000
+      - name: baseline
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: ${env:SAMPLE_PERCENT}
+
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    headers:
+      X-Scope-OrgID: ${env:TENANT}
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    headers:
+      X-Scope-OrgID: ${env:TENANT}
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+
+  # Prometheus remote-write rather than Mimir's OTLP endpoint, for one reason:
+  # `add_metric_suffixes: false`.
+  #
+  # The OTel-to-Prometheus translation normally appends unit and `_total`
+  # suffixes, so `service_state` would arrive as something else and every one of
+  # the 67 existing alert rules and every existing dashboard panel would miss
+  # it. During the dual-path period the same series must be identical whether it
+  # arrived by scrape or by push, or the two cannot be compared and the cutover
+  # cannot be verified. This flag is what makes the forced-parity decision
+  # actually hold.
+  #
+  # resource_to_telemetry_conversion promotes resource attributes to labels,
+  # which is how `sitename` above becomes the label the dashboards filter on --
+  # the same label autogole Prometheus produces by relabelling.
+  prometheusremotewrite/mimir:
+    endpoint: http://mimir:8080/api/v1/push
+    headers:
+      X-Scope-OrgID: ${env:TENANT}
+    add_metric_suffixes: false
+    resource_to_telemetry_conversion:
+      enabled: true
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 300s
+
+service:
+  extensions: [health_check, oidc]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      # The gateway's own metrics, scraped by whatever monitors this namespace.
+      # A telemetry pipeline that cannot report its own health is the failure
+      # mode that took a live-cluster investigation to find once already.
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/identity, tail_sampling, batch]
+      exporters: [otlp/tempo]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/identity, batch]
+      exporters: [prometheusremotewrite/mimir]
+
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/identity, batch]
+      exporters: [otlphttp/loki]

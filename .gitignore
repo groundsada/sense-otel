@@ -1,0 +1,8 @@
+# Real secrets never belong here. k8s/01-secrets.example.yaml is the template;
+# anything else matching these names is a filled-in copy and must stay local.
+k8s/*secret*.yaml
+!k8s/*secrets.example.yaml
+*.key
+*.pem
+.env
+kubeconfig

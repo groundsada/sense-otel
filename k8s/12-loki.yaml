@@ -1,0 +1,163 @@
+---
+# Loki: log backend.
+#
+# SiteRM does not push logs itself and must not be made to. It keeps writing to
+# disk exactly as it does today; a collector alongside each frontend tails the
+# files and forwards them here through the gateway. If this is down, SiteRM does
+# not notice, does not block and does not buffer -- logging stays out of the
+# request path.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki
+  namespace: sense-viz
+data:
+  loki.yaml: |
+    auth_enabled: true
+
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9096
+      log_level: info
+
+    common:
+      path_prefix: /var/loki
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+      storage:
+        s3:
+          endpoint: ${S3_ENDPOINT}
+          bucketnames: mfsada-sense-viz-loki
+          access_key_id: ${AWS_ACCESS_KEY_ID}
+          secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+          s3forcepathstyle: true
+          insecure: true
+
+    schema_config:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: s3
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+
+    storage_config:
+      tsdb_shipper:
+        active_index_directory: /var/loki/tsdb-index
+        cache_location: /var/loki/tsdb-cache
+
+    compactor:
+      working_directory: /var/loki/compactor
+      retention_enabled: true
+      delete_request_store: s3
+
+    limits_config:
+      retention_period: 336h
+      allow_structured_metadata: true
+      volume_enabled: true
+
+      # Which OTLP resource attributes become Loki index labels.
+      #
+      # `sitename` is here because the gateway stamps it from the verified
+      # credential, so it is bounded by the number of sites and is the label
+      # every query filters on. Everything else stays structured metadata --
+      # promoting a high-cardinality attribute to a label is how a Loki index
+      # gets destroyed, and delta ids and hostnames appear in these logs.
+      otlp_config:
+        resource_attributes:
+          attributes_config:
+            - action: index_label
+              attributes:
+                - sitename
+                - service.name
+                - siterm.component
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: sense-viz
+spec:
+  selector:
+    app: loki
+  ports:
+    - name: http
+      port: 3100
+      targetPort: 3100
+    - name: grpc
+      port: 9096
+      targetPort: 9096
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: loki
+  namespace: sense-viz
+spec:
+  serviceName: loki
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loki
+  template:
+    metadata:
+      labels:
+        app: loki
+    spec:
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        runAsNonRoot: true
+      containers:
+        - name: loki
+          image: grafana/loki:3.7.6
+          args:
+            - -config.file=/conf/loki.yaml
+            - -config.expand-env=true
+            - -target=all
+          ports:
+            - containerPort: 3100
+              name: http
+            - containerPort: 9096
+              name: grpc
+          envFrom:
+            - secretRef:
+                name: obs-s3
+          volumeMounts:
+            - name: conf
+              mountPath: /conf
+            - name: data
+              mountPath: /var/loki
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3100
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+      volumes:
+        - name: conf
+          configMap:
+            name: loki
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: rook-ceph-block
+        resources:
+          requests:
+            storage: 20Gi

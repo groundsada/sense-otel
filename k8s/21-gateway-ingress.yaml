@@ -1,0 +1,48 @@
+---
+# Public HTTPS ingress for the gateway.
+#
+# APPLY THIS LAST, and only once OIDC auth is confirmed working. Until then this
+# publishes an unauthenticated OTLP endpoint to the internet. Everything else in
+# this directory is reachable only from inside the cluster, so the stack is safe
+# to stand up before the ingress exists.
+#
+# Why this exists at all: 15 of the 29 SiteRM frontends are not on NRP. Six are
+# on FABRIC (cern1-sub1-gw1.exp.fabric-testbed.net and friends) and nine are on
+# site-owned infrastructure (cmssense1.fnal.gov, red-sense-rm.unl.edu,
+# sense.af.uchicago.edu, r740xd4.it.northwestern.edu, ...). They cannot reach a
+# ClusterIP, and NRP only publishes HTTPS externally.
+#
+# The route is to port 4318 -- OTLP/HTTP, not gRPC. HAProxy can carry gRPC with
+# a backend-protocol annotation, but that needs HTTP/2 negotiated end to end,
+# and an institutional egress proxy that terminates and re-originates TLS will
+# break it in a way that surfaces as an opaque connection error. OTLP/HTTP is an
+# ordinary POST and survives anything that passes normal HTTPS. Frontends inside
+# the cluster keep using gRPC on 4317 via the Service.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: otlp-gateway
+  namespace: sense-viz
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    ingress.kubernetes.io/ssl-redirect: "true"
+    # OTLP payloads are protobuf batches and the default proxy body limit is
+    # smaller than a busy site's batch.
+    ingress.kubernetes.io/proxy-body-size: 32m
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: REPLACEME
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: otlp-gateway
+                port:
+                  number: 4318
+  tls:
+    - hosts:
+        - REPLACEME
+      secretName: otlp-gateway-tls

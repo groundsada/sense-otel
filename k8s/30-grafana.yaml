@@ -1,0 +1,201 @@
+---
+# Grafana for the sense-viz stack.
+#
+# This does NOT replace autogole-grafana. That stack stays primary: it holds 60+
+# dashboards, 11 datasources including ESnet Stardust, and sense-rtmon writes
+# generated per-flow dashboards into it on a schedule. This one exists to build
+# and validate the push path alongside it. Replacement is a later, separate
+# decision.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: sense-viz
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      # Single tenant for the whole fleet, with `sitename` as an attribute the
+      # gateway stamps from each site's verified credential.
+      #
+      # Per-site tenants were the alternative. They were not chosen because the
+      # thing that actually needs to be unforgeable is site attribution, and
+      # stamping it at the gateway achieves that without 29 tenants to
+      # provision, 29 datasources to keep in step, and Loki's refusal to merge
+      # tenants in one query. It also matches the model already in production:
+      # one Prometheus, `sitename` as a label applied centrally.
+      - name: Tempo
+        type: tempo
+        uid: tempo-sense
+        orgId: 1
+        access: proxy
+        url: http://tempo:3200
+        jsonData:
+          httpHeaderName1: X-Scope-OrgID
+          # Jump from a trace to the logs that trace produced.
+          tracesToLogsV2:
+            datasourceUid: loki-sense
+            spanStartTimeShift: -5m
+            spanEndTimeShift: 5m
+            filterByTraceID: true
+            tags:
+              - key: sitename
+        secureJsonData:
+          httpHeaderValue1: "sense"
+
+      - name: Loki
+        type: loki
+        uid: loki-sense
+        orgId: 1
+        access: proxy
+        url: http://loki:3100
+        jsonData:
+          httpHeaderName1: X-Scope-OrgID
+          # The other half of the pivot: a log line carrying a trace id becomes
+          # a link into Tempo. This is the entire point of instrumenting logging
+          # in SiteRM, and it is worthless until trace ids are real rather than
+          # the trace_id=0 that an inactive span produces.
+          derivedFields:
+            - name: TraceID
+              matcherRegex: 'trace_id=(\w+)'
+              url: '$${__value.raw}'
+              datasourceUid: tempo-sense
+        secureJsonData:
+          httpHeaderValue1: "sense"
+
+      - name: Mimir
+        type: prometheus
+        uid: mimir-sense
+        orgId: 1
+        access: proxy
+        url: http://mimir:8080/prometheus
+        isDefault: true
+        jsonData:
+          httpHeaderName1: X-Scope-OrgID
+        secureJsonData:
+          httpHeaderValue1: "sense"
+
+      # The existing production Prometheus, read-only, alongside Mimir.
+      #
+      # Not decoration: during the dual-path period the same series arrives both
+      # ways, and the only way to prove the forced-parity requirement holds is
+      # to graph both in one panel and see them coincide. Without this the
+      # cutover is a leap of faith.
+      #
+      # Requires credentials -- fill in via the grafana-autogole secret rather
+      # than here.
+      - name: Prometheus (autogole)
+        type: prometheus
+        uid: prom-autogole
+        orgId: 1
+        access: proxy
+        url: https://autogole-prometheus.nrp-nautilus.io/
+        basicAuth: true
+        basicAuthUser: $${AUTOGOLE_PROM_USER}
+        secureJsonData:
+          basicAuthPassword: $${AUTOGOLE_PROM_PASSWORD}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: sense-viz
+spec:
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: sense-viz
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      securityContext:
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        runAsNonRoot: true
+      containers:
+        - name: grafana
+          image: grafana/grafana:12.2.1
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: admin-password
+            # Datasource provisioning expands these, which keeps the autogole
+            # credentials out of the ConfigMap and out of git.
+            - name: AUTOGOLE_PROM_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-autogole
+                  key: username
+                  optional: true
+            - name: AUTOGOLE_PROM_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-autogole
+                  key: password
+                  optional: true
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: data
+              mountPath: /var/lib/grafana
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "200m"
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: data
+          persistentVolumeClaim:
+            claimName: grafana-data
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data
+  namespace: sense-viz
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: rook-ceph-block
+  resources:
+    requests:
+      storage: 5Gi

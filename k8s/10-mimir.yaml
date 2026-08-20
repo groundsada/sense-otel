@@ -1,0 +1,167 @@
+---
+# Mimir: metrics backend for the push path.
+#
+# Runs alongside the existing autogole Prometheus rather than replacing it. For
+# now it receives the same series a second time, by push, so that parity between
+# the scraped and pushed copy can be PROVEN before anything is cut over --
+# rather than a rename being discovered after the fact by a dashboard that
+# silently stopped matching.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mimir
+  namespace: sense-viz
+data:
+  mimir.yaml: |
+    multitenancy_enabled: true
+    tenant_federation:
+      enabled: true
+
+    server:
+      http_listen_port: 8080
+      grpc_listen_port: 9095
+      log_level: info
+
+    common:
+      storage:
+        backend: s3
+        s3:
+          endpoint: ${S3_ENDPOINT}
+          bucket_name: mfsada-sense-viz-mimir
+          access_key_id: ${AWS_ACCESS_KEY_ID}
+          secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+          insecure: true
+
+    # One bucket, separated by prefix. Mimir rejects a config where two of these
+    # share the same bucket and prefix.
+    blocks_storage:
+      storage_prefix: blocks
+      tsdb:
+        dir: /data/tsdb
+      bucket_store:
+        sync_dir: /data/tsdb-sync
+
+    ruler_storage:
+      storage_prefix: ruler
+
+    alertmanager_storage:
+      storage_prefix: alertmanager
+
+    # Single replica: no quorum to satisfy.
+    ingester:
+      ring:
+        replication_factor: 1
+
+    store_gateway:
+      sharding_ring:
+        replication_factor: 1
+
+    # These default to relative paths (./data-compactor, ./data-ruler) against
+    # the container working directory, which uid 10001 cannot write. They must
+    # point at the mounted volume or the process fails its sanity check.
+    compactor:
+      data_dir: /data/compactor
+
+    ruler:
+      rule_path: /data/ruler
+
+    alertmanager:
+      data_dir: /data/alertmanager
+
+    activity_tracker:
+      filepath: /data/metrics-activity.log
+
+    limits:
+      compactor_blocks_retention_period: 90d
+      # The gateway promotes resource attributes to labels, and the DTN relay
+      # will eventually push ~140k series. Raised from the 150k default so the
+      # ceiling is a deliberate number rather than a surprise.
+      max_global_series_per_user: 500000
+      # Sites push, so samples arrive with whatever clock skew the site has.
+      creation_grace_period: 10m
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mimir
+  namespace: sense-viz
+spec:
+  selector:
+    app: mimir
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+    - name: grpc
+      port: 9095
+      targetPort: 9095
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mimir
+  namespace: sense-viz
+spec:
+  serviceName: mimir
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mimir
+  template:
+    metadata:
+      labels:
+        app: mimir
+    spec:
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        runAsNonRoot: true
+      containers:
+        - name: mimir
+          image: grafana/mimir:3.1.4
+          args:
+            - -config.file=/conf/mimir.yaml
+            - -config.expand-env=true
+            - -target=all
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 9095
+              name: grpc
+          envFrom:
+            - secretRef:
+                name: obs-s3
+          volumeMounts:
+            - name: conf
+              mountPath: /conf
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 6Gi
+      volumes:
+        - name: conf
+          configMap:
+            name: mimir
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: rook-ceph-block
+        resources:
+          requests:
+            storage: 20Gi

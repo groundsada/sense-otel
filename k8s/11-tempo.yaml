@@ -1,0 +1,130 @@
+---
+# Tempo: trace backend.
+#
+# Note there is no OTLP receiver exposed to sites here. Tempo receives only from
+# the gateway, over the cluster network. Sites address the gateway and nothing
+# else, which is what lets this be moved or replaced without touching 29 site
+# configurations.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo
+  namespace: sense-viz
+data:
+  tempo.yaml: |
+    multitenancy_enabled: true
+
+    server:
+      http_listen_port: 3200
+      grpc_listen_port: 9095
+
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+
+    # Tempo 3.x renamed the ingest path: there is no top-level `ingester` or
+    # `compactor` any more. Ingestion is the distributor plus live_store, and
+    # compaction moved under backend_scheduler/backend_worker.
+    live_store:
+      max_block_duration: 5m
+
+    storage:
+      trace:
+        backend: s3
+        s3:
+          endpoint: ${S3_ENDPOINT}
+          bucket: mfsada-sense-viz-tempo
+          access_key: ${AWS_ACCESS_KEY_ID}
+          secret_key: ${AWS_SECRET_ACCESS_KEY}
+          insecure: true
+          forcepathstyle: true
+        wal:
+          path: /var/tempo/wal
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: sense-viz
+spec:
+  selector:
+    app: tempo
+  ports:
+    - name: http
+      port: 3200
+      targetPort: 3200
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tempo
+  namespace: sense-viz
+spec:
+  serviceName: tempo
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tempo
+  template:
+    metadata:
+      labels:
+        app: tempo
+    spec:
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        runAsNonRoot: true
+      containers:
+        - name: tempo
+          image: grafana/tempo:3.0.2
+          args:
+            - -config.file=/conf/tempo.yaml
+            - -config.expand-env=true
+          ports:
+            - containerPort: 3200
+              name: http
+            - containerPort: 4317
+              name: otlp-grpc
+          envFrom:
+            - secretRef:
+                name: obs-s3
+          volumeMounts:
+            - name: conf
+              mountPath: /conf
+            - name: data
+              mountPath: /var/tempo
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3200
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+      volumes:
+        - name: conf
+          configMap:
+            name: tempo
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: rook-ceph-block
+        resources:
+          requests:
+            storage: 20Gi

@@ -1,0 +1,115 @@
+---
+# The OTLP gateway itself. Its pipeline is collector/config.yaml, turned into a
+# ConfigMap by the configMapGenerator in kustomization.yaml -- so the two cannot
+# drift, and editing the pipeline rolls this Deployment.
+#
+# A Deployment rather than a StatefulSet: the gateway holds no durable state.
+# The one caveat is tail sampling, which buffers a trace's spans in memory until
+# it decides. With more than one replica, spans of the same trace can land on
+# different replicas and each sees only part of the trace. Scaling past one
+# replica therefore needs a loadbalancing exporter in front, routing by trace
+# id. One replica is correct until throughput demands otherwise.
+apiVersion: v1
+kind: Service
+metadata:
+  name: otlp-gateway
+  namespace: sense-viz
+spec:
+  selector:
+    app: otlp-gateway
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: metrics
+      port: 8888
+      targetPort: 8888
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otlp-gateway
+  namespace: sense-viz
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otlp-gateway
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: otlp-gateway
+    spec:
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        runAsNonRoot: true
+      containers:
+        - name: collector
+          image: otel/opentelemetry-collector-contrib:0.158.0
+          args:
+            - --config=/conf/config.yaml
+          ports:
+            - containerPort: 4317
+              name: otlp-grpc
+            - containerPort: 4318
+              name: otlp-http
+            - containerPort: 8888
+              name: metrics
+            - containerPort: 13133
+              name: health
+          env:
+            # Backends are addressed by service name inside this namespace, so
+            # they are not configurable here on purpose -- a site never learns
+            # them and never needs to.
+            - name: TENANT
+              value: sense
+            # Baseline rate for traces that are neither errors nor slow. Errors
+            # and slow traces are kept unconditionally by the tail sampling
+            # policies, so this is the rate for the uninteresting majority.
+            - name: SAMPLE_PERCENT
+              value: "10"
+            - name: OIDC_USERNAME_CLAIM
+              value: sub
+          envFrom:
+            - secretRef:
+                name: gateway-oidc
+          volumeMounts:
+            - name: conf
+              mountPath: /conf
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "500m"
+              # memory_limiter in the config works off a percentage of this
+              # limit, so the two are coupled: changing the limit changes when
+              # the collector starts refusing data.
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+      volumes:
+        - name: conf
+          configMap:
+            name: otlp-gateway
