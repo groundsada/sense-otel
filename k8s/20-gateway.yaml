@@ -50,8 +50,11 @@ spec:
       containers:
         - name: collector
           image: otel/opentelemetry-collector-contrib:0.158.0
+          # Two files, disjoint keys, merged as a map union. registry.yaml is
+          # generated -- see scripts/gen-registry.py.
           args:
             - --config=/conf/config.yaml
+            - --config=/conf/registry.yaml
           ports:
             - containerPort: 4317
               name: otlp-grpc
@@ -68,13 +71,6 @@ spec:
             # unconditionally by the tail_sampling policies.
             - name: SAMPLE_PERCENT
               value: "10"
-            # Not `sub` -- that is the service account UUID. Keycloak sets this
-            # claim from a hardcoded per-client mapper.
-            - name: OIDC_USERNAME_CLAIM
-              value: sitename
-          envFrom:
-            - secretRef:
-                name: gateway-oidc
           volumeMounts:
             - name: conf
               mountPath: /conf

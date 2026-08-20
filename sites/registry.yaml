@@ -1,0 +1,85 @@
+# SiteRM frontend issuer registry. Source of truth for both sides of OTLP auth.
+#
+# Each frontend is its own OIDC issuer, so the gateway trusts 29 issuers rather
+# than one. `scripts/gen-registry.py` turns this into collector/registry.yaml
+# (the oidc providers and the issuer -> sitename map) and into the env block a
+# site pastes into /etc/environment. Generating both from one file is the point:
+# a token whose `iss` does not match the gateway's provider list is rejected, and
+# hand-maintaining the two lists guarantees that eventually happens.
+#
+# `issuer` must be byte-identical to what the frontend puts in OIDC_ISSUER --
+# go-oidc compares the discovery document's `issuer` field to the configured
+# issuer_url exactly. The :443 is dropped here because that is the canonical URL
+# form, and non-default ports are kept for the same reason.
+#
+# Derived from the 29 *_STATE scrape jobs in the autogole prometheus config
+# (opennsa/prometheus-config), which is the authoritative frontend list. Verified
+# 1:1 against keycloak/sites.txt. `sitename` must keep matching the label those
+# jobs stamp, or pushed and scraped series will not join.
+
+audience: sense-otlp
+
+sites:
+  - sitename: NRM_CENIC
+    issuer: https://sense-ladowntown.nrp-nautilus.io
+  - sitename: NRM_CENICDEV
+    issuer: https://sense-dev-ladowntown.nrp-nautilus.io
+  - sitename: NRM_GPN
+    issuer: https://sense-gpn.nrp-nautilus.io
+  - sitename: T1_US_FNAL
+    issuer: https://cmssense1.fnal.gov:8443
+  - sitename: T2_US_Caltech
+    issuer: https://sense-caltech-fe.tier2-lb.ultralight.org
+  - sitename: T2_US_Caltech_DEV
+    issuer: https://sense-dev-caltechprod.nrp-nautilus.io
+  - sitename: T2_US_Caltech_Test
+    issuer: https://sense-caltechtest.sdn-lb.ultralight.org
+  - sitename: T2_US_MGHPCC
+    issuer: https://sense-mghpcc.nrp-nautilus.io
+  - sitename: T2_US_Nebraska
+    issuer: https://red-sense-rm.unl.edu:10443
+  - sitename: T2_US_SDSC
+    issuer: https://sense-prpdev.nrp-nautilus.io
+  - sitename: T2_US_SDSC_DEV
+    issuer: https://sense-dev-sdsc.nrp-nautilus.io
+  - sitename: T2_US_SDSC_OASISDEV
+    issuer: https://sense-dev-oasis.nrp-nautilus.io
+  - sitename: T2_US_SDSC_S63
+    issuer: https://sense-t2-us-sdsc-s63.nrp-nautilus.io
+  - sitename: T2_US_UCSD
+    issuer: https://sense-t2-us-ucsd.nrp-nautilus.io
+  - sitename: T2_US_UCSD_OASIS
+    issuer: https://sense-oasis.nrp-nautilus.io
+  - sitename: T2_US_UChicago
+    issuer: https://sense.af.uchicago.edu
+  # Placeholder in the scrape config too ("<yet to be added>"), so there is no
+  # host to trust yet. Enrolling it is a one-line edit here plus a regenerate.
+  - sitename: T2_US_Wisconsin
+    issuer: null
+  - sitename: T3_FABRIC_AMST
+    issuer: https://amst-sub1-gw1.exp.fabric-testbed.net
+  - sitename: T3_FABRIC_CERN
+    issuer: https://sense-cern-fabric.nrp-nautilus.io
+  - sitename: T3_FABRIC_CERN1
+    issuer: https://cern1-sub1-gw1.exp.fabric-testbed.net
+  - sitename: T3_FABRIC_STAR
+    issuer: https://star-sub1-gw1.exp.fabric-testbed.net
+  # Scraped by IPv6 literal, with no hostname anywhere in the autogole config.
+  # An issuer URL works here only if the frontend certificate carries an IP SAN
+  # for this address, which is unusual. Needs a DNS name before it can enroll.
+  - sitename: T3_US_FAB_Bluefield3
+    issuer: null
+  - sitename: T3_US_FAB_LOSA
+    issuer: https://losa-sub1-gw1.exp.fabric-testbed.net
+  - sitename: T3_US_FAB_NEWY
+    issuer: https://newy-sub1-gw1.exp.fabric-testbed.net
+  - sitename: T3_US_FAB_UCSD
+    issuer: https://ucsd-sub1-gw1.exp.fabric-testbed.net
+  - sitename: T3_US_Internet2
+    issuer: https://sense-nrp-internet2.nrp-nautilus.io
+  - sitename: T3_US_NRP
+    issuer: https://sense-fe.nrp-nautilus.io
+  - sitename: T3_US_SL_400G
+    issuer: https://g5intel2.it.northwestern.edu:8443
+  - sitename: T3_US_Starlight
+    issuer: https://r740xd4.it.northwestern.edu:8443

@@ -4,20 +4,15 @@
 # stamps `sitename` from the verified token and overwrites whatever the site
 # sent. Same guarantee the autogole Prometheus gets from relabel_configs.
 #
-# From the environment: OIDC_ISSUER_URL, OIDC_AUDIENCE, OIDC_USERNAME_CLAIM,
-# TENANT, SAMPLE_PERCENT.
+# The `oidc` extension and `transform/sitename` are NOT here -- they are
+# generated into collector/registry.yaml from sites/registry.yaml and merged at
+# startup. Both files are passed to the collector and hold disjoint keys.
+#
+# From the environment: TENANT, SAMPLE_PERCENT.
 
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
-
-  # providers is a list so keycloak and CILogon can both be accepted during a
-  # migration; the extension matches on the token's `iss`.
-  oidc:
-    providers:
-      - issuer_url: ${env:OIDC_ISSUER_URL}
-        audience: ${env:OIDC_AUDIENCE}
-        username_claim: ${env:OIDC_USERNAME_CLAIM}
 
 receivers:
   otlp:
@@ -39,8 +34,8 @@ processors:
 
   # `auth.subject` is the only usable source: the oidc extension exposes just
   # `subject` and `membership`, so `auth.claims.<name>` resolves to nothing and
-  # leaves the attribute untouched. OIDC_USERNAME_CLAIM=sitename is what makes
-  # the subject the site name rather than the service account UUID.
+  # leaves the attribute untouched. With `username_claim: iss` the subject is the
+  # frontend's issuer URL, which transform/sitename then resolves to a name.
   #
   # `resource` not `attributes`, so one stamp covers traces, metrics and logs.
   resource/identity:
@@ -132,15 +127,15 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, resource/identity, tail_sampling, batch]
+      processors: [memory_limiter, resource/identity, transform/sitename, tail_sampling, batch]
       exporters: [otlp_grpc/tempo]
 
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, resource/identity, batch]
+      processors: [memory_limiter, resource/identity, transform/sitename, batch]
       exporters: [prometheus_remote_write/mimir]
 
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, resource/identity, batch]
+      processors: [memory_limiter, resource/identity, transform/sitename, batch]
       exporters: [otlp_http/loki]

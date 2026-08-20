@@ -20,6 +20,7 @@ configMapGenerator:
   - name: otlp-gateway
     files:
       - config.yaml=collector/config.yaml
+      - registry.yaml=collector/registry.yaml
 
 # Secrets are never generated from files here -- they are created by hand from
 # k8s/01-secrets.example.yaml.
