@@ -58,6 +58,8 @@ gateway has to be the thing that does it.
 | `k8s/30-grafana.yaml` | Grafana, datasources wired for the trace↔log pivot |
 | `k8s/31-grafana-ingress.yaml` | public HTTPS UI |
 | `k8s/40-backup.yaml` | nightly mirror of the primary buckets to the fallback RGW |
+| `keycloak/sites.txt` | the 29 SiteRM frontends |
+| `scripts/provision-realm.sh` | create the realm and one client per site, idempotently |
 | `scripts/site-credential.sh` | print one site's OTLP config block |
 
 ## Deploying
@@ -88,14 +90,25 @@ apply rather than waiting for an unrelated restart to pick it up.
 
 ## Onboarding a site
 
-Sites are provisioned in the `sense-telemetry` realm as confidential clients
-named `siterm-<SITENAME>`, service accounts only, with two mappers: a hardcoded
-`sitename` claim and an audience of `sense-otlp`. All 29 SiteRM frontends
-already exist.
+Sites are confidential clients in the `sense-telemetry` realm named
+`siterm-<SITENAME>`, service accounts only, with two mappers: a hardcoded
+`sitename` claim and an audience of `sense-otlp`. The roster is
+`keycloak/sites.txt`, taken from the `*_STATE` scrape jobs in the autogole
+Prometheus config.
 
 ```sh
-./scripts/site-credential.sh T2_US_SDSC
+./scripts/provision-realm.sh              # idempotent; creates realm + 29 clients
+./scripts/site-credential.sh T2_US_SDSC   # print one site's config block
 ```
+
+`provision-realm.sh` exists because `sd-keycloak` runs in `sense-dev` on a
+database that gets rebuilt — it happened once during this work and took the
+realm and all 29 clients with it. Client secrets are cached in the
+`siterm-otlp-clients` Secret in `sense-viz` and pushed back on re-provision, so
+a rebuild does not invalidate credentials sites already hold. Verified by
+deleting the realm and re-running: same secret, gateway still returns 200.
+
+Delete that Secret to rotate everything.
 
 A site exchanges those for a token by client credentials grant:
 
@@ -204,7 +217,9 @@ copy by push so parity can be proven before anything is switched. Traces and
 logs are pure addition — there is nothing to migrate, which is why they go first.
 
 **The issuer is a dev keycloak.** `sd-keycloak` lives in the `sense-dev`
-namespace. The realm and clients are isolated from `master` and `StackV`, but
-this is not production-grade IdP hosting. The `providers:` block in the collector
+namespace on a database that is rebuilt from time to time. The realm and clients
+are isolated from `master` and `StackV`, but this is not production-grade IdP
+hosting, which is why provisioning is a committed script rather than something
+done by hand. The `providers:` block in the collector
 config is a list precisely so a second issuer (CILogon) can be accepted
 alongside it during a migration, with no flag day for sites.

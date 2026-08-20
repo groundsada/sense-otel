@@ -1,0 +1,32 @@
+# SiteRM frontends, one per line. Derived from the *_STATE scrape jobs in the
+# autogole prometheus config, which is the authoritative list of frontends.
+# Values must match the `sitename` label those jobs already stamp.
+NRM_CENIC
+NRM_CENICDEV
+NRM_GPN
+T1_US_FNAL
+T2_US_Caltech
+T2_US_Caltech_DEV
+T2_US_Caltech_Test
+T2_US_MGHPCC
+T2_US_Nebraska
+T2_US_SDSC
+T2_US_SDSC_DEV
+T2_US_SDSC_OASISDEV
+T2_US_SDSC_S63
+T2_US_UCSD
+T2_US_UCSD_OASIS
+T2_US_UChicago
+T2_US_Wisconsin
+T3_FABRIC_AMST
+T3_FABRIC_CERN
+T3_FABRIC_CERN1
+T3_FABRIC_STAR
+T3_US_FAB_Bluefield3
+T3_US_FAB_LOSA
+T3_US_FAB_NEWY
+T3_US_FAB_UCSD
+T3_US_Internet2
+T3_US_NRP
+T3_US_SL_400G
+T3_US_Starlight
