@@ -77,6 +77,39 @@ data:
         secureJsonData:
           basicAuthPassword: $${AUTOGOLE_PROM_PASSWORD}
 
+      # Datasources the autogole dashboards read that are NOT and will not be in
+      # LGTM. Carried here with the same uids so those dashboards import and
+      # render unchanged. All optional -- Grafana provisioning tolerates a
+      # datasource whose credentials are absent; panels using it error, the rest
+      # of the dashboard works.
+
+      # ESnet Stardust. External, ESnet-operated, index sd_public_interfaces.
+      # 116 panel references. Nothing in this project will ever produce it.
+      - name: ESnet
+        type: elasticsearch
+        uid: esnet-stardust
+        orgId: 1
+        access: proxy
+        url: https://el.gc1.prod.stardust.es.net:9200
+        database: sd_public_interfaces
+        basicAuth: true
+        basicAuthUser: $${ESNET_USER}
+        secureJsonData:
+          basicAuthPassword: $${ESNET_PASSWORD}
+
+      # The end-to-end test harness. Nine of these exist in autogole; eight have
+      # no backing pods, so only this one is carried. Cross-namespace ClusterIP,
+      # verified reachable from sense-viz.
+      - name: MySQL-ESnet
+        type: mysql
+        uid: mysql-esnet
+        orgId: 1
+        access: proxy
+        url: run-endtoendesnet.opennsa.svc.cluster.local:3306
+        user: $${E2E_MYSQL_USER}
+        secureJsonData:
+          password: $${E2E_MYSQL_PASSWORD}
+
 ---
 apiVersion: v1
 kind: Service
@@ -99,6 +132,10 @@ metadata:
   namespace: sense-viz
 spec:
   replicas: 1
+  # Recreate, not RollingUpdate: the data PVC is ReadWriteOnce, so a surge pod
+  # cannot mount it while the old pod holds it and the rollout deadlocks.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: grafana
@@ -147,6 +184,30 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: grafana-autogole
+                  key: password
+                  optional: true
+            - name: ESNET_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-esnet
+                  key: username
+                  optional: true
+            - name: ESNET_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-esnet
+                  key: password
+                  optional: true
+            - name: E2E_MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-e2e-mysql
+                  key: username
+                  optional: true
+            - name: E2E_MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-e2e-mysql
                   key: password
                   optional: true
           volumeMounts:
