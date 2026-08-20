@@ -13,9 +13,9 @@
 # form, and non-default ports are kept for the same reason.
 #
 # Derived from the 29 *_STATE scrape jobs in the autogole prometheus config
-# (opennsa/prometheus-config), which is the authoritative frontend list. Verified
-# 1:1 against keycloak/sites.txt. `sitename` must keep matching the label those
-# jobs stamp, or pushed and scraped series will not join.
+# (opennsa/prometheus-config), which is the authoritative frontend list.
+# `sitename` must keep matching the label those jobs stamp, or pushed and
+# scraped series will not join.
 
 audience: sense-otlp
 

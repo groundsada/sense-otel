@@ -25,20 +25,32 @@ replaced without reconfiguring 29 sites.
 | OTLP ingest | `https://sense-otlp.nrp-nautilus.io/v1/{traces,metrics,logs}` |
 | in-cluster gRPC | `otlp-gateway.sense-viz.svc:4317` |
 | Grafana | `https://sense-viz.nrp-nautilus.io` |
-| issuer | `https://sd-keycloak-sense-dev.nrp-nautilus.io/realms/sense-telemetry` |
+| issuers | each SiteRM frontend, 27 enrolled — `sites/registry.yaml` |
 | audience | `sense-otlp` |
 
 ## The one property that matters
 
 **Site identity comes from the credential, never from the payload.**
 
-Each site holds a keycloak client whose token carries a `sitename` claim fixed
-by a hardcoded mapper at issue time. The gateway uses that claim as the token
-subject and stamps it over whatever `sitename` the payload contained. A
-misconfigured or hostile site cannot write into another site's data.
+There is no separate identity provider. Every SiteRM frontend is already an OIDC
+issuer: it publishes `/.well-known/openid-configuration` and
+`/.well-known/jwks.json`, and mints short-lived RS256 tokens from an X509
+challenge-response against the host certificate. The gateway trusts all of them,
+because the collector's `oidc` extension takes `providers` as a list.
 
-Verified, not assumed — a span sent with `sitename=EVIL_SPOOFED_SITE` under the
-`T2_US_SDSC` credential lands in Tempo as `sitename=T2_US_SDSC`.
+Identity is the token's `iss`, via `username_claim: iss`. A site cannot forge it:
+the collector fetches the signing keys from that issuer URL, so claiming to be
+someone else means signing with a key published at *their* JWKS endpoint. The
+`sitename` claim in the token is never read. `transform/sitename` resolves the
+issuer URL to a name centrally, from the same registry that decided which
+issuers to trust at all.
+
+Verified, not assumed — a second issuer minting `sitename: I_AM_LYING_ABOUT_MY_SITE`
+for a valid certificate produced `sitename: T2_US_CALTECH` at the gateway. Ten
+negative cases are rejected with 401, including certificate replay with an
+attacker key, a self-signed certificate forging an enrolled DN, a trusted CA with
+an unenrolled DN, challenge replay, a token signed by a key absent from JWKS,
+expiry, wrong audience, and an `alg=none` downgrade.
 
 This is the same guarantee the autogole Prometheus gets by applying `sitename`
 centrally in `relabel_configs` at scrape time. Push has no relabeller, so the
@@ -49,6 +61,10 @@ gateway has to be the thing that does it.
 | Path | |
 |---|---|
 | `collector/config.yaml` | the gateway pipeline — receivers, auth, sampling, exporters |
+| `collector/registry.yaml` | generated. Trusted issuers and the issuer→sitename map |
+| `sites/registry.yaml` | **source of truth.** One line per frontend |
+| `sites/generated/site-env.txt` | generated. The env block each frontend pastes |
+| `scripts/gen-registry.py` | regenerates both. `--check` fails when stale |
 | `k8s/01-secrets.example.yaml` | template only. Never filled in and committed |
 | `k8s/10-mimir.yaml` | metrics |
 | `k8s/11-tempo.yaml` | traces |
@@ -58,9 +74,6 @@ gateway has to be the thing that does it.
 | `k8s/30-grafana.yaml` | Grafana, datasources wired for the trace↔log pivot |
 | `k8s/31-grafana-ingress.yaml` | public HTTPS UI |
 | `k8s/40-backup.yaml` | nightly mirror of the primary buckets to the fallback RGW |
-| `keycloak/sites.txt` | the 29 SiteRM frontends |
-| `scripts/provision-realm.sh` | create the realm and one client per site, idempotently |
-| `scripts/site-credential.sh` | print one site's OTLP config block |
 
 ## Deploying
 
@@ -73,54 +86,55 @@ kubectl create secret generic obs-s3 -n sense-viz \
   --from-literal=AWS_SECRET_ACCESS_KEY=... \
   --from-literal=S3_ENDPOINT=rook-ceph-rgw-nautiluss3.rook
 
-kubectl create secret generic gateway-oidc -n sense-viz \
-  --from-literal=OIDC_ISSUER_URL=https://<issuer>/realms/sense-telemetry \
-  --from-literal=OIDC_AUDIENCE=sense-otlp
-
 kubectl create secret generic grafana-admin -n sense-viz \
   --from-literal=admin-user=... --from-literal=admin-password=...
 ```
 
+There is no credential secret for OTLP auth. Trust is a list of public issuer
+URLs in `collector/registry.yaml`, so it belongs in git rather than in a Secret.
+
 Then `kubectl apply -k .`
 
-`collector/config.yaml` becomes the gateway ConfigMap via a
-`configMapGenerator`, which appends a content hash to the name and rewrites the
-Deployment's reference — so editing the pipeline rolls the gateway on the next
-apply rather than waiting for an unrelated restart to pick it up.
+`collector/config.yaml` and `collector/registry.yaml` become the gateway
+ConfigMap via a `configMapGenerator`, which appends a content hash to the name
+and rewrites the Deployment's reference — so editing either one rolls the gateway
+on the next apply rather than waiting for an unrelated restart to pick it up.
+Both are passed with `--config` and merged; they hold disjoint keys, so the merge
+is a plain map union and never depends on how lists are resolved.
 
 ## Onboarding a site
 
-Sites are confidential clients in the `sense-telemetry` realm named
-`siterm-<SITENAME>`, service accounts only, with two mappers: a hardcoded
-`sitename` claim and an audience of `sense-otlp`. The roster is
-`keycloak/sites.txt`, taken from the `*_STATE` scrape jobs in the autogole
-Prometheus config.
+No credential is issued, because the site already has one: its host certificate.
+Enrolling is telling the gateway which issuer URL belongs to which site.
 
 ```sh
-./scripts/provision-realm.sh              # idempotent; creates realm + 29 clients
-./scripts/site-credential.sh T2_US_SDSC   # print one site's config block
+$EDITOR sites/registry.yaml      # add sitename + issuer
+./scripts/gen-registry.py        # regenerate both artifacts
+kubectl apply -k .               # content hash rolls the gateway
 ```
 
-`provision-realm.sh` exists because `sd-keycloak` runs in `sense-dev` on a
-database that gets rebuilt — it happened once during this work and took the
-realm and all 29 clients with it. Client secrets are cached in the
-`siterm-otlp-clients` Secret in `sense-viz` and pushed back on re-provision, so
-a rebuild does not invalidate credentials sites already hold. Verified by
-deleting the realm and re-running: same secret, gateway still returns 200.
+Then give the site its block from `sites/generated/site-env.txt`, which goes in
+the frontend's `/etc/environment`:
 
-Delete that Secret to rotate everything.
-
-A site exchanges those for a token by client credentials grant:
-
-```sh
-curl -s -X POST "$ISSUER/protocol/openid-connect/token" \
-  -d grant_type=client_credentials \
-  -d client_id=siterm-T2_US_SDSC \
-  --data-urlencode "client_secret=$SECRET" | jq -r .access_token
+```
+OIDC_ISSUER=https://sense-t2-us-sdsc.nrp-nautilus.io
+OIDC_SITENAME=T2_US_SDSC
+OIDC_EXTRA_AUDIENCE=sense-otlp
+OTLP_AUTH_URL=https://sense-t2-us-sdsc.nrp-nautilus.io
+OTLP_ENDPOINT=https://sense-otlp.nrp-nautilus.io
 ```
 
-Adding a site later means one client with the same two mappers, and nothing on
-the gateway changes.
+`OIDC_ISSUER` must be byte-identical on both sides. go-oidc compares the
+discovery document's `issuer` field to the configured `issuer_url` exactly, and
+a mismatch is a 401 with nothing in the payload to explain it — which is the
+whole reason both sides are generated from one file rather than maintained
+twice. `gen-registry.py --check` fails when the generated copies are stale, so CI
+can hold that.
+
+Two of the 29 frontends cannot enroll yet and are `issuer: null` in the registry:
+`T2_US_Wisconsin` is a `<yet to be added>` placeholder in the scrape config, and
+`T3_US_FAB_Bluefield3` is reachable only by IPv6 literal, which needs a DNS name
+before it can have a matching certificate.
 
 ### Why two protocols
 
@@ -190,8 +204,10 @@ exactly that name.
 **Identity comes from `auth.subject` only.** The oidc extension exposes exactly
 two context attributes, `subject` and `membership`. `auth.claims.<name>` is not
 reachable and resolves silently to nothing, so it looks like a working fallback
-and is not. `OIDC_USERNAME_CLAIM=sitename` is what makes the subject the site
-name instead of the service account's UUID.
+and is not. `username_claim: iss` is what puts the issuer URL there, and
+`transform/sitename` turns it into a name afterwards. Reading `sitename` from the
+token instead would be one config line shorter and would hand every site the
+ability to write as any other.
 
 **Sampling is tail, not head.** With no instrumented orchestrator above SiteRM,
 every trace is its own root and each site samples independently, so a 10% head
@@ -216,10 +232,14 @@ Metrics still reach Grafana by the existing pull path; Mimir receives a second
 copy by push so parity can be proven before anything is switched. Traces and
 logs are pure addition — there is nothing to migrate, which is why they go first.
 
-**The issuer is a dev keycloak.** `sd-keycloak` lives in the `sense-dev`
-namespace on a database that is rebuilt from time to time. The realm and clients
-are isolated from `master` and `StackV`, but this is not production-grade IdP
-hosting, which is why provisioning is a committed script rather than something
-done by hand. The `providers:` block in the collector
-config is a list precisely so a second issuer (CILogon) can be accepted
-alongside it during a migration, with no flag day for sites.
+**There is no IdP, deliberately.** An earlier version of this ran on a keycloak
+realm with 29 confidential clients. That meant 29 secrets to distribute, rotate
+and survive a database rebuild — the `sense-dev` keycloak was in fact rebuilt
+once during this work and took the whole realm with it. Every one of those
+secrets was a second name for an identity the grid PKI already establishes, so
+the frontends now issue their own tokens from the host certificate and the
+gateway trusts their JWKS. No shared secret exists anywhere in this path.
+
+That is only possible because the `oidc` extension's `providers` is a list. A
+single-issuer extension would have forced either one issuer for the fleet — which
+is the IdP again — or one receiver and one port per site.
