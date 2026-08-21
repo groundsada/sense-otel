@@ -25,7 +25,7 @@ replaced without reconfiguring 29 sites.
 | OTLP ingest | `https://sense-otlp.nrp-nautilus.io/v1/{traces,metrics,logs}` |
 | in-cluster gRPC | `otlp-gateway.sense-viz.svc:4317` |
 | Grafana | `https://sense-viz.nrp-nautilus.io` |
-| issuers | each SiteRM frontend, 27 enrolled — `sites/registry.yaml` |
+| issuers | each SiteRM frontend, 20 enrolled of 27 known — `sites/registry.yaml` |
 | audience | `sense-otlp` |
 
 ## The one property that matters
@@ -244,6 +244,28 @@ That is only possible because the `oidc` extension's `providers` is a list. A
 single-issuer extension would have forced either one issuer for the fleet — which
 is the IdP again — or one receiver and one port per site.
 
+**One bad issuer stops the whole gateway.** The oidc extension's `Start()`
+accumulates errors across every configured provider with `multierr.Append` and
+returns non-nil if *any* one of them failed, so the collector exits. Enrolling a
+site therefore makes fleet-wide ingest depend on that site being reachable at
+gateway-restart time — an availability inversion worth knowing about before
+adding issuers. Two consequences are baked into `sites/registry.yaml`:
+
+- `enrolled: false` keeps a site in the probe target list but out of the oidc
+  providers, so an unreachable frontend is still watched without being able to
+  prevent startup. Seven of the 27 are currently in that state.
+- `issuer` must be **byte-identical** to what the frontend publishes in its
+  discovery document, and this is not derivable by a rule. Most frontends
+  publish the explicit `:443`; `sense-nrp-internet2` and `sense-fe` publish
+  without it. Getting this wrong is not a per-site failure — it stops the
+  gateway. `scripts/gen-registry.py --verify` reads every enrolled frontend's
+  discovery document and diffs it against the registry:
+
+```
+$ ./scripts/gen-registry.py --verify
+20 enrolled issuers match their discovery documents
+```
+
 **Probes stay an outside observation.** `probe_*` and `up` are produced by the
 observer, not the target — a site that has fallen over cannot push a metric
 saying so — so they are the one thing that cannot migrate to the push path. A
@@ -252,7 +274,10 @@ blackbox exporter and a tiny second collector (`k8s/50-blackbox.yaml`) scrape th
 and `probe_ssl_earliest_cert_expiry` into Mimir under the same `sitename` label
 the push path carries. The target list is `collector/probes.yaml`, generated from
 the same `sites/registry.yaml` that decides which issuers the gateway trusts, so
-a site cannot be enrolled for OTLP and silently left unprobed.
+a site cannot be enrolled for OTLP and silently left unprobed. The probe list is
+deliberately the wider of the two — every frontend with a known URL, including
+the seven that are not enrolled — because a site the gateway cannot reach is
+exactly the one worth probing.
 
 The 67 autogole alert rules are loaded into Mimir's ruler verbatim
 (`k8s/51-alert-rules.yaml`), so `ALERTS` and `ALERTS_FOR_STATE` keep existing in
