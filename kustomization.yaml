@@ -13,6 +13,8 @@ resources:
   - k8s/30-grafana.yaml
   - k8s/31-grafana-ingress.yaml
   - k8s/40-backup.yaml
+  - k8s/50-blackbox.yaml
+  - k8s/51-alert-rules.yaml
 
 # Content hash in the ConfigMap name, so editing the pipeline rolls the gateway
 # instead of waiting for an unrelated restart.
@@ -21,6 +23,11 @@ configMapGenerator:
     files:
       - config.yaml=collector/config.yaml
       - registry.yaml=collector/registry.yaml
+  # Blackbox and probe scrape configs, generated from the same registry that
+  # decides which issuers the gateway trusts.
+  - name: probe-targets
+    files:
+      - probes.yaml=collector/probes.yaml
 
 # Secrets are never generated from files here -- they are created by hand from
 # k8s/01-secrets.example.yaml.

@@ -243,3 +243,42 @@ gateway trusts their JWKS. No shared secret exists anywhere in this path.
 That is only possible because the `oidc` extension's `providers` is a list. A
 single-issuer extension would have forced either one issuer for the fleet — which
 is the IdP again — or one receiver and one port per site.
+
+**Probes stay an outside observation.** `probe_*` and `up` are produced by the
+observer, not the target — a site that has fallen over cannot push a metric
+saying so — so they are the one thing that cannot migrate to the push path. A
+blackbox exporter and a tiny second collector (`k8s/50-blackbox.yaml`) scrape the
+27 frontends from here and remote-write `probe_success`, `probe_http_status_code`
+and `probe_ssl_earliest_cert_expiry` into Mimir under the same `sitename` label
+the push path carries. The target list is `collector/probes.yaml`, generated from
+the same `sites/registry.yaml` that decides which issuers the gateway trusts, so
+a site cannot be enrolled for OTLP and silently left unprobed.
+
+The 67 autogole alert rules are loaded into Mimir's ruler verbatim
+(`k8s/51-alert-rules.yaml`), so `ALERTS` and `ALERTS_FOR_STATE` keep existing in
+Mimir and the dashboards that read them stay useful during the dual-path period.
+Rule-group limit: Mimir's default allows 20 rules per group, the port has 67, so
+`ruler_max_rules_per_rule_group: 200` is set in `k8s/10-mimir.yaml`.
+
+Measured on deploy: 20 of the 27 frontends probe green, and the seven that do
+not are all about the observer's network rather than the sites.
+
+- The six FABRIC frontends (`*.exp.fabric-testbed.net`) publish **AAAA records
+  only**, and pods in `sense-viz` get a link-local `fe80::` address and no
+  global IPv6 — the cluster has no v6 egress, so they cannot be reached from
+  here at all. Autogole probes them from a dual-stack network with paired
+  `*_V4`/`*_V6` jobs. A v6 module here would have nothing to route over, so
+  only the v4 half is reproduced.
+- `T1_US_FNAL`'s `:8443` is TCP-filtered from this namespace (connection
+  refused at the transport, before any TLS negotiation) while open to
+  `opennsa`.
+
+Both need a network change, not a config change, so `ProbeFailed` fires for
+those seven until then — worth knowing before treating the alerts as real.
+
+Separately, `MonitoringUnavailable` and the disk/inode rules read
+`up{software="SiteRM-NodeExporter"}` and `disk_usage`, which are produced by a
+node_exporter on the polling host and reach autogole through the frontend's
+`/api/<SITE>/monitoring/prometheus/passthrough/<host>` endpoint. No
+node_exporter series exist here yet, so those rules stay silent until the
+site-side push path (#26) lands.

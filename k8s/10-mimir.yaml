@@ -73,6 +73,10 @@ data:
 
     limits:
       compactor_blocks_retention_period: 90d
+      # The 67 autogole alert rules live in a single rule group so the port stays
+      # a verbatim diff to upstream. The default allows 20 per group. Raised
+      # rather than 0 so the guard still catches a runaway group.
+      ruler_max_rules_per_rule_group: 200
       # The gateway promotes resource attributes to labels, and the DTN relay
       # will eventually push ~140k series. Raised from the 150k default so the
       # ceiling is a deliberate number rather than a surprise.
