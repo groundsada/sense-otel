@@ -57,9 +57,6 @@ extensions:
     - issuer_url: https://sense-oasis.nrp-nautilus.io:443
       audience: sense-otlp
       username_claim: iss
-    - issuer_url: https://sense.af.uchicago.edu:443
-      audience: sense-otlp
-      username_claim: iss
     - issuer_url: https://sense-cern-fabric.nrp-nautilus.io:443
       audience: sense-otlp
       username_claim: iss
@@ -99,7 +96,6 @@ processors:
     - set(resource.attributes["sitename"], "T2_US_SDSC_S63") where resource.attributes["sitename"] == "https://sense-t2-us-sdsc-s63.nrp-nautilus.io:443"
     - set(resource.attributes["sitename"], "T2_US_UCSD") where resource.attributes["sitename"] == "https://sense-t2-us-ucsd.nrp-nautilus.io:443"
     - set(resource.attributes["sitename"], "T2_US_UCSD_OASIS") where resource.attributes["sitename"] == "https://sense-oasis.nrp-nautilus.io:443"
-    - set(resource.attributes["sitename"], "T2_US_UChicago") where resource.attributes["sitename"] == "https://sense.af.uchicago.edu:443"
     - set(resource.attributes["sitename"], "T3_FABRIC_CERN") where resource.attributes["sitename"] == "https://sense-cern-fabric.nrp-nautilus.io:443"
     - set(resource.attributes["sitename"], "T3_US_Internet2") where resource.attributes["sitename"] == "https://sense-nrp-internet2.nrp-nautilus.io"
     - set(resource.attributes["sitename"], "T3_US_NRP") where resource.attributes["sitename"] == "https://sense-fe.nrp-nautilus.io"
@@ -122,7 +118,6 @@ processors:
     - set(resource.attributes["sitename"], "T2_US_SDSC_S63") where resource.attributes["sitename"] == "https://sense-t2-us-sdsc-s63.nrp-nautilus.io:443"
     - set(resource.attributes["sitename"], "T2_US_UCSD") where resource.attributes["sitename"] == "https://sense-t2-us-ucsd.nrp-nautilus.io:443"
     - set(resource.attributes["sitename"], "T2_US_UCSD_OASIS") where resource.attributes["sitename"] == "https://sense-oasis.nrp-nautilus.io:443"
-    - set(resource.attributes["sitename"], "T2_US_UChicago") where resource.attributes["sitename"] == "https://sense.af.uchicago.edu:443"
     - set(resource.attributes["sitename"], "T3_FABRIC_CERN") where resource.attributes["sitename"] == "https://sense-cern-fabric.nrp-nautilus.io:443"
     - set(resource.attributes["sitename"], "T3_US_Internet2") where resource.attributes["sitename"] == "https://sense-nrp-internet2.nrp-nautilus.io"
     - set(resource.attributes["sitename"], "T3_US_NRP") where resource.attributes["sitename"] == "https://sense-fe.nrp-nautilus.io"
@@ -145,7 +140,6 @@ processors:
     - set(resource.attributes["sitename"], "T2_US_SDSC_S63") where resource.attributes["sitename"] == "https://sense-t2-us-sdsc-s63.nrp-nautilus.io:443"
     - set(resource.attributes["sitename"], "T2_US_UCSD") where resource.attributes["sitename"] == "https://sense-t2-us-ucsd.nrp-nautilus.io:443"
     - set(resource.attributes["sitename"], "T2_US_UCSD_OASIS") where resource.attributes["sitename"] == "https://sense-oasis.nrp-nautilus.io:443"
-    - set(resource.attributes["sitename"], "T2_US_UChicago") where resource.attributes["sitename"] == "https://sense.af.uchicago.edu:443"
     - set(resource.attributes["sitename"], "T3_FABRIC_CERN") where resource.attributes["sitename"] == "https://sense-cern-fabric.nrp-nautilus.io:443"
     - set(resource.attributes["sitename"], "T3_US_Internet2") where resource.attributes["sitename"] == "https://sense-nrp-internet2.nrp-nautilus.io"
     - set(resource.attributes["sitename"], "T3_US_NRP") where resource.attributes["sitename"] == "https://sense-fe.nrp-nautilus.io"

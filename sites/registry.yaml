@@ -71,8 +71,16 @@ sites:
     issuer: https://sense-t2-us-ucsd.nrp-nautilus.io:443
   - sitename: T2_US_UCSD_OASIS
     issuer: https://sense-oasis.nrp-nautilus.io:443
+  # Went unreachable on 2026-08-31: TCP connect to :443 times out from sense-viz
+  # (3/3 attempts, 12s each, connect never completes) and is refused from
+  # outside NRP entirely. It had been enrolled and working, and the gateway kept
+  # serving because the oidc extension only resolves issuers at startup -- the
+  # first restart after the site went down is what surfaced it, by
+  # crashlooping the new pod while the old one carried on. Re-enrol once
+  # `scripts/gen-registry.py --verify` reaches it again.
   - sitename: T2_US_UChicago
     issuer: https://sense.af.uchicago.edu:443
+    enrolled: false
   # Placeholder in the scrape config too ("<yet to be added>"), so there is no
   # host to trust yet. Enrolling it is a one-line edit here plus a regenerate.
   - sitename: T2_US_Wisconsin
