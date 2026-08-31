@@ -147,3 +147,10 @@ sites:
     issuer: http://service-siterm-fe-t9-us-mohdev-a-a1a1a1a1a1a1a1a1a1a1a1a1a1a1.sense-dev.svc.cluster.local:8443
   - sitename: T9_US_MOHDEV_B
     issuer: http://service-siterm-fe-t9-us-mohdev-b-b2b2b2b2b2b2b2b2b2b2b2b2b2b2.sense-dev.svc.cluster.local:8443
+  # C and D are the two sites otel-setup-notes/scripts/gen.py builds, rather than
+  # the helm charts A and B use. Same issuer shape all the same -- gen.py renders
+  # the chart's telemetry env block by hand.
+  - sitename: T9_US_MOHDEV_C
+    issuer: http://service-siterm-fe-t9-us-mohdev-c-e5e5e5e5e5e5e5e5e5e5e5e5e5e5.sense-dev.svc.cluster.local:8443
+  - sitename: T9_US_MOHDEV_D
+    issuer: http://service-siterm-fe-t9-us-mohdev-d-a7a7a7a7a7a7a7a7a7a7a7a7a7a7.sense-dev.svc.cluster.local:8443

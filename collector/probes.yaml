@@ -53,6 +53,8 @@ receivers:
           - https://r740xd4.it.northwestern.edu:8443
           - http://service-siterm-fe-t9-us-mohdev-a-a1a1a1a1a1a1a1a1a1a1a1a1a1a1.sense-dev.svc.cluster.local:8443
           - http://service-siterm-fe-t9-us-mohdev-b-b2b2b2b2b2b2b2b2b2b2b2b2b2b2.sense-dev.svc.cluster.local:8443
+          - http://service-siterm-fe-t9-us-mohdev-c-e5e5e5e5e5e5e5e5e5e5e5e5e5e5.sense-dev.svc.cluster.local:8443
+          - http://service-siterm-fe-t9-us-mohdev-d-a7a7a7a7a7a7a7a7a7a7a7a7a7a7.sense-dev.svc.cluster.local:8443
         relabel_configs:
         - source_labels:
           - __address__
@@ -207,3 +209,13 @@ receivers:
           regex: http://service-siterm-fe-t9-us-mohdev-b-b2b2b2b2b2b2b2b2b2b2b2b2b2b2.sense-dev.svc.cluster.local:8443
           target_label: sitename
           replacement: T9_US_MOHDEV_B
+        - source_labels:
+          - instance
+          regex: http://service-siterm-fe-t9-us-mohdev-c-e5e5e5e5e5e5e5e5e5e5e5e5e5e5.sense-dev.svc.cluster.local:8443
+          target_label: sitename
+          replacement: T9_US_MOHDEV_C
+        - source_labels:
+          - instance
+          regex: http://service-siterm-fe-t9-us-mohdev-d-a7a7a7a7a7a7a7a7a7a7a7a7a7a7.sense-dev.svc.cluster.local:8443
+          target_label: sitename
+          replacement: T9_US_MOHDEV_D
