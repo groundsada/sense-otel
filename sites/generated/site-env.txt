@@ -102,6 +102,13 @@ OIDC_EXTRA_AUDIENCE=sense-otlp
 OTLP_AUTH_URL=https://sense-oasis.nrp-nautilus.io:443
 OTLP_ENDPOINT=https://sense-otlp.nrp-nautilus.io
 
+# T2_US_UChicago
+OIDC_ISSUER=https://sense.af.uchicago.edu:443
+OIDC_SITENAME=T2_US_UChicago
+OIDC_EXTRA_AUDIENCE=sense-otlp
+OTLP_AUTH_URL=https://sense.af.uchicago.edu:443
+OTLP_ENDPOINT=https://sense-otlp.nrp-nautilus.io
+
 # T3_FABRIC_CERN
 OIDC_ISSUER=https://sense-cern-fabric.nrp-nautilus.io:443
 OIDC_SITENAME=T3_FABRIC_CERN
