@@ -139,4 +139,3 @@ sites:
     issuer: http://service-siterm-fe-t9-us-mohdev-a-a1a1a1a1a1a1a1a1a1a1a1a1a1a1.sense-dev.svc.cluster.local:8443
   - sitename: T9_US_MOHDEV_B
     issuer: http://service-siterm-fe-t9-us-mohdev-b-b2b2b2b2b2b2b2b2b2b2b2b2b2b2.sense-dev.svc.cluster.local:8443
-    enrolled: false
