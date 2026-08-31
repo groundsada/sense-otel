@@ -111,6 +111,38 @@ data:
           password: $${E2E_MYSQL_PASSWORD}
 
 ---
+# File provisioning for dashboards kept in git (../dashboards/*.json, mounted by
+# the grafana-dashboards ConfigMap the kustomization generates).
+#
+# This is NOT how sense-rtmon delivers its dashboards. That pushes over the
+# Grafana HTTP API (GrafanaAPI.py update_dashboard), so its output lands in the
+# grafana-data PVC and is invisible to git. The two mechanisms coexist: anything
+# provisioned from a file here is read-only in the UI and reproducible from the
+# repo, anything rtmon pushes is editable and is not.
+#
+# allowUiUpdates stays false on purpose. With it true, a UI edit silently wins
+# until the next Grafana restart reverts it, which is the worst of both.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: sense-viz
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: sense
+        orgId: 1
+        folder: SENSE
+        type: file
+        disableDeletion: false
+        allowUiUpdates: false
+        updateIntervalSeconds: 30
+        options:
+          path: /etc/grafana/dashboards/sense
+          foldersFromFilesStructure: false
+
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -213,6 +245,13 @@ spec:
           volumeMounts:
             - name: datasources
               mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            # Deliberately NOT under /var/lib/grafana: that path is the PVC, and
+            # mounting a ConfigMap inside another volume's mount point works but
+            # is fragile. Grafana does not require dashboards to live there.
+            - name: dashboards
+              mountPath: /etc/grafana/dashboards/sense
             - name: data
               mountPath: /var/lib/grafana
           readinessProbe:
@@ -232,6 +271,12 @@ spec:
         - name: datasources
           configMap:
             name: grafana-datasources
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards
         - name: data
           persistentVolumeClaim:
             claimName: grafana-data

@@ -1,0 +1,418 @@
+{
+  "uid": "siterm-push-path",
+  "title": "SiteRM — Push Path Overview",
+  "description": "What the OTLP push path carries that the autogole scrape path does not. Reads Mimir and Loki in the sense-viz stack only; autogole-grafana is not involved.",
+  "tags": ["siterm", "sense", "otel", "push"],
+  "timezone": "utc",
+  "style": "dark",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "sitename",
+        "label": "Site",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "mimir-sense" },
+        "query": { "query": "label_values(service_state, sitename)", "refId": "sites" },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" },
+        "sort": 1,
+        "allValue": ".+"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Fleet at a glance",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Sites pushing telemetry",
+      "description": "Distinct sitename values currently producing service_state. Only sites running the OTel-instrumented image appear here.",
+      "datasource": { "type": "prometheus", "uid": "mimir-sense" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(count by (sitename) (service_state{sitename=~\"$sitename\"}))",
+          "instant": true
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "textMode": "value",
+        "colorMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "#3987e5" },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Services OK",
+      "description": "service_state is a prometheus_client Enum: the state is carried in the service_state LABEL and the value is a 0/1 flag for which state is active. Counting the metric directly would count every possible state, not the live one.",
+      "datasource": { "type": "prometheus", "uid": "mimir-sense" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(service_state{service_state=\"OK\", sitename=~\"$sitename\"} == 1) or vector(0)",
+          "instant": true
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "textMode": "value",
+        "colorMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "#0ca30c" },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Services FAILED",
+      "description": "Status colour, not a series colour: green at zero, critical above it.",
+      "datasource": { "type": "prometheus", "uid": "mimir-sense" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(service_state{service_state=\"FAILED\", sitename=~\"$sitename\"} == 1) or vector(0)",
+          "instant": true
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "textMode": "value",
+        "colorMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#0ca30c", "value": null },
+              { "color": "#d03b3b", "value": 1 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Fleet probes up",
+      "description": "Blackbox probe success across every frontend in the registry, enrolled or not. This is the one panel that covers the whole fleet rather than just the pushing sites.",
+      "datasource": { "type": "prometheus", "uid": "mimir-sense" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "targets": [
+        { "refId": "A", "expr": "avg(probe_success)", "instant": true }
+      ],
+      "options": {
+        "graphMode": "none",
+        "textMode": "value",
+        "colorMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#d03b3b", "value": null },
+              { "color": "#fab219", "value": 0.8 },
+              { "color": "#0ca30c", "value": 0.95 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "Service health",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Current service state by site",
+      "description": "Only the active state per service (== 1). Identity is carried by the row, so state uses the reserved status colours and never a series hue.",
+      "datasource": { "type": "prometheus", "uid": "mimir-sense" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "service_state{sitename=~\"$sitename\"} == 1",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true,
+              "job": true,
+              "otel_scope_name": true,
+              "service_name": true,
+              "hostname": true
+            },
+            "renameByName": {
+              "sitename": "Site",
+              "servicename": "Service",
+              "service_state": "State"
+            },
+            "indexByName": { "sitename": 0, "servicename": 1, "service_state": 2 }
+          }
+        },
+        { "id": "sortBy", "options": { "fields": {}, "sort": [{ "field": "State", "desc": false }] } }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": { "show": false, "reducer": ["sum"], "countRows": false, "fields": "" }
+      },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left", "filterable": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "State" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": { "color": "#0ca30c", "index": 0 },
+                      "WARNING": { "color": "#fab219", "index": 1 },
+                      "UNKNOWN": { "color": "#ec835a", "index": 2 },
+                      "FAILED": { "color": "#d03b3b", "index": 3 }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Failed services over time",
+      "description": "Per-site colour is pinned by name, so filtering the Site variable never repaints the surviving series.",
+      "datasource": { "type": "prometheus", "uid": "mimir-sense" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count by (sitename) (service_state{service_state=\"FAILED\", sitename=~\"$sitename\"} == 1)",
+          "legendFormat": "{{sitename}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": [] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "pointSize": 8,
+            "axisGridShow": true
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "T9_US_MOHDEV_A" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#3987e5" } }] },
+          { "matcher": { "id": "byName", "options": "T9_US_MOHDEV_B" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#d95926" } }] },
+          { "matcher": { "id": "byName", "options": "T9_US_MOHDEV_C" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#199e70" } }] },
+          { "matcher": { "id": "byName", "options": "T9_US_MOHDEV_D" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#c98500" } }] }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "title": "Daemon health — only exists on the push path",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "bargauge",
+      "title": "Daemon staleness (time since last successful cycle)",
+      "description": "Magnitude ranked across daemons, so a bar gauge rather than a line chart. Sourced from siterm_daemon_last_success_timestamp_seconds, which the scrape path does not emit.",
+      "datasource": { "type": "prometheus", "uid": "mimir-sense" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(12, time() - siterm_daemon_last_success_timestamp_seconds{sitename=~\"$sitename\"})",
+          "instant": true,
+          "legendFormat": "{{sitename}} · {{component}}"
+        }
+      ],
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "text",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#0ca30c", "value": null },
+              { "color": "#fab219", "value": 300 },
+              { "color": "#d03b3b", "value": 900 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Daemon cycle error rate",
+      "datasource": { "type": "prometheus", "uid": "mimir-sense" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (sitename) (rate(siterm_daemon_cycle_errors_total{sitename=~\"$sitename\"}[$__rate_interval]))",
+          "legendFormat": "{{sitename}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": [] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "pointSize": 8
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "T9_US_MOHDEV_A" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#3987e5" } }] },
+          { "matcher": { "id": "byName", "options": "T9_US_MOHDEV_B" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#d95926" } }] },
+          { "matcher": { "id": "byName", "options": "T9_US_MOHDEV_C" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#199e70" } }] },
+          { "matcher": { "id": "byName", "options": "T9_US_MOHDEV_D" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#c98500" } }] }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "title": "Logs",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Log volume by site",
+      "description": "Same site colours as the metric panels above, so a site keeps one identity across the whole dashboard.",
+      "datasource": { "type": "loki", "uid": "loki-sense" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 27 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (sitename) (count_over_time({sitename=~\"$sitename\"}[$__auto]))",
+          "legendFormat": "{{sitename}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": [] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "never",
+            "stacking": { "mode": "normal", "group": "A" }
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "T9_US_MOHDEV_A" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#3987e5" } }] },
+          { "matcher": { "id": "byName", "options": "T9_US_MOHDEV_B" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#d95926" } }] },
+          { "matcher": { "id": "byName", "options": "T9_US_MOHDEV_C" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#199e70" } }] },
+          { "matcher": { "id": "byName", "options": "T9_US_MOHDEV_D" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#c98500" } }] }
+        ]
+      }
+    }
+  ]
+}

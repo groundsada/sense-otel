@@ -28,6 +28,15 @@ configMapGenerator:
   - name: probe-targets
     files:
       - probes.yaml=collector/probes.yaml
+  # Dashboards provisioned from files, so editing one rolls grafana rather than
+  # waiting up to updateIntervalSeconds for the provisioner to notice.
+  #
+  # A ConfigMap caps at ~1MB. That is fine for a curated set but will not hold
+  # the full autogole dashboard library -- those come from sense-rtmon over the
+  # API instead. Split into a second generator before that becomes a problem.
+  - name: grafana-dashboards
+    files:
+      - siterm-push-path.json=dashboards/siterm-push-path.json
 
 # Secrets are never generated from files here -- they are created by hand from
 # k8s/01-secrets.example.yaml.
