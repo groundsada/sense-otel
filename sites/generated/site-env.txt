@@ -143,3 +143,10 @@ OIDC_SITENAME=T3_US_Starlight
 OIDC_EXTRA_AUDIENCE=sense-otlp
 OTLP_AUTH_URL=https://r740xd4.it.northwestern.edu:8443
 OTLP_ENDPOINT=https://sense-otlp.nrp-nautilus.io
+
+# T9_US_MOHDEV_A
+OIDC_ISSUER=http://service-siterm-fe-t9-us-mohdev-a-a1a1a1a1a1a1a1a1a1a1a1a1a1a1.sense-dev.svc.cluster.local:8443
+OIDC_SITENAME=T9_US_MOHDEV_A
+OIDC_EXTRA_AUDIENCE=sense-otlp
+OTLP_AUTH_URL=http://service-siterm-fe-t9-us-mohdev-a-a1a1a1a1a1a1a1a1a1a1a1a1a1a1.sense-dev.svc.cluster.local:8443
+OTLP_ENDPOINT=https://sense-otlp.nrp-nautilus.io

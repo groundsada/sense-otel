@@ -75,6 +75,9 @@ extensions:
     - issuer_url: https://r740xd4.it.northwestern.edu:8443
       audience: sense-otlp
       username_claim: iss
+    - issuer_url: http://service-siterm-fe-t9-us-mohdev-a-a1a1a1a1a1a1a1a1a1a1a1a1a1a1.sense-dev.svc.cluster.local:8443
+      audience: sense-otlp
+      username_claim: iss
 processors:
   transform/sitename:
     error_mode: ignore
@@ -99,6 +102,7 @@ processors:
     - set(resource.attributes["sitename"], "T3_US_NRP") where resource.attributes["sitename"] == "https://sense-fe.nrp-nautilus.io"
     - set(resource.attributes["sitename"], "T3_US_SL_400G") where resource.attributes["sitename"] == "https://g5intel2.it.northwestern.edu:8443"
     - set(resource.attributes["sitename"], "T3_US_Starlight") where resource.attributes["sitename"] == "https://r740xd4.it.northwestern.edu:8443"
+    - set(resource.attributes["sitename"], "T9_US_MOHDEV_A") where resource.attributes["sitename"] == "http://service-siterm-fe-t9-us-mohdev-a-a1a1a1a1a1a1a1a1a1a1a1a1a1a1.sense-dev.svc.cluster.local:8443"
     metric_statements:
     - set(resource.attributes["sitename"], "NRM_CENIC") where resource.attributes["sitename"] == "https://sense-ladowntown.nrp-nautilus.io:443"
     - set(resource.attributes["sitename"], "NRM_CENICDEV") where resource.attributes["sitename"] == "https://sense-dev-ladowntown.nrp-nautilus.io:443"
@@ -120,6 +124,7 @@ processors:
     - set(resource.attributes["sitename"], "T3_US_NRP") where resource.attributes["sitename"] == "https://sense-fe.nrp-nautilus.io"
     - set(resource.attributes["sitename"], "T3_US_SL_400G") where resource.attributes["sitename"] == "https://g5intel2.it.northwestern.edu:8443"
     - set(resource.attributes["sitename"], "T3_US_Starlight") where resource.attributes["sitename"] == "https://r740xd4.it.northwestern.edu:8443"
+    - set(resource.attributes["sitename"], "T9_US_MOHDEV_A") where resource.attributes["sitename"] == "http://service-siterm-fe-t9-us-mohdev-a-a1a1a1a1a1a1a1a1a1a1a1a1a1a1.sense-dev.svc.cluster.local:8443"
     log_statements:
     - set(resource.attributes["sitename"], "NRM_CENIC") where resource.attributes["sitename"] == "https://sense-ladowntown.nrp-nautilus.io:443"
     - set(resource.attributes["sitename"], "NRM_CENICDEV") where resource.attributes["sitename"] == "https://sense-dev-ladowntown.nrp-nautilus.io:443"
@@ -141,3 +146,4 @@ processors:
     - set(resource.attributes["sitename"], "T3_US_NRP") where resource.attributes["sitename"] == "https://sense-fe.nrp-nautilus.io"
     - set(resource.attributes["sitename"], "T3_US_SL_400G") where resource.attributes["sitename"] == "https://g5intel2.it.northwestern.edu:8443"
     - set(resource.attributes["sitename"], "T3_US_Starlight") where resource.attributes["sitename"] == "https://r740xd4.it.northwestern.edu:8443"
+    - set(resource.attributes["sitename"], "T9_US_MOHDEV_A") where resource.attributes["sitename"] == "http://service-siterm-fe-t9-us-mohdev-a-a1a1a1a1a1a1a1a1a1a1a1a1a1a1.sense-dev.svc.cluster.local:8443"

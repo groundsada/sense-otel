@@ -117,3 +117,26 @@ sites:
     issuer: https://g5intel2.it.northwestern.edu:8443
   - sitename: T3_US_Starlight
     issuer: https://r740xd4.it.northwestern.edu:8443
+
+  # ---- sense-dev, the two-site development namespace ----------------------
+  #
+  # Not production frontends. They run in the sense-dev namespace on the same
+  # Nautilus cluster as this gateway, so their issuer is an in-cluster FQDN
+  # rather than a public https host: nothing outside the cluster needs to reach
+  # them, and giving dev frontends public ingresses to satisfy OIDC would be the
+  # wrong trade.
+  #
+  # These land in the blackbox probe list too -- probe targets are derived from
+  # `issuer`, there is no separate URL field -- which is fine because blackbox
+  # runs in-cluster and can resolve them. It does mean `probe_success` gains two
+  # series that go hard down whenever sense-dev does.
+  #
+  # THE RISK, stated plainly: these issuers only resolve while the sense-dev
+  # namespace exists. The oidc extension refuses to start if ANY provider fails,
+  # so if sense-dev is torn down and this gateway restarts, ingest stops for
+  # every site above. Set `enrolled: false` on both the moment sense-dev goes.
+  - sitename: T9_US_MOHDEV_A
+    issuer: http://service-siterm-fe-t9-us-mohdev-a-a1a1a1a1a1a1a1a1a1a1a1a1a1a1.sense-dev.svc.cluster.local:8443
+  - sitename: T9_US_MOHDEV_B
+    issuer: http://service-siterm-fe-t9-us-mohdev-b-b2b2b2b2b2b2b2b2b2b2b2b2b2b2.sense-dev.svc.cluster.local:8443
+    enrolled: false
