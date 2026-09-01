@@ -50,6 +50,28 @@ data:
           ip_protocol_fallback: true
           tls_config:
             insecure_skip_verify: true
+      # Identical except fail_if_not_ssl. The four MOHDEV frontends publish a
+      # plain-http issuer on :8443 inside the cluster, and `issuer` is also the
+      # probe target -- so http_2xx got "Received HTTP response status_code=200"
+      # followed by "Final request was not over SSL" and reported
+      # probe_success 0 for four sites that were healthy and pushing the whole
+      # time. gen-registry.py routes http:// targets here via __param_module.
+      #
+      # probe_ssl_earliest_cert_expiry is simply absent for these targets, which
+      # is correct: there is no certificate to expire. Panels reading it must
+      # tolerate absence rather than treating it as an expiry of zero.
+      http_2xx_plain:
+        prober: http
+        timeout: 10s
+        http:
+          valid_status_codes: []
+          method: GET
+          follow_redirects: true
+          fail_if_not_ssl: false
+          preferred_ip_protocol: ip4
+          ip_protocol_fallback: true
+          tls_config:
+            insecure_skip_verify: true
       # No icmp module. Autogole runs an *_ICMP_V4 job per site, but Gatekeeper
       # on this cluster refuses NET_RAW (allowed: NET_ADMIN, SYS_NICE,
       # NET_BIND_SERVICE, SYS_PTRACE, SETPCAP, SETFCAP, IPC_LOCK) and the icmp

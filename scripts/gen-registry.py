@@ -123,6 +123,14 @@ def probes(sites):
     gateway stamps it on the push path: the probe target cannot be trusted to
     name itself. Without it ProbeFailed (`probe_success == 0`) would fire with
     an empty sitename.
+
+    The module is chosen per target rather than per job. `http_2xx` sets
+    fail_if_not_ssl, so a plain-http issuer fails the probe even when the
+    frontend answers 200 -- which is exactly what the four in-cluster MOHDEV
+    frontends do, and they read as a four-site outage until the module matches
+    the scheme. Splitting into two scrape jobs would have worked too, but it
+    would also split the `job` label, and the ported probe_* alert rules match
+    on it. Rewriting `__param_module` keeps one job.
     """
     return {
         "receivers": {"prometheus/probes": {"config": {"scrape_configs": [
@@ -136,6 +144,7 @@ def probes(sites):
                     {"source_labels": ["__address__"], "target_label": "__param_target"},
                     {"source_labels": ["__param_target"], "target_label": "instance"},
                     {"target_label": "__address__", "replacement": "blackbox:9115"},
+                    {"source_labels": ["__param_target"], "regex": "http://.*", "target_label": "__param_module", "replacement": "http_2xx_plain"},
                 ]
                 + [
                     {"source_labels": ["instance"], "regex": s["issuer"], "target_label": "sitename", "replacement": s["sitename"]}

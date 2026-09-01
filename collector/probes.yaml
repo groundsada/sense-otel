@@ -65,6 +65,11 @@ receivers:
         - target_label: __address__
           replacement: blackbox:9115
         - source_labels:
+          - __param_target
+          regex: http://.*
+          target_label: __param_module
+          replacement: http_2xx_plain
+        - source_labels:
           - instance
           regex: https://sense-ladowntown.nrp-nautilus.io:443
           target_label: sitename
